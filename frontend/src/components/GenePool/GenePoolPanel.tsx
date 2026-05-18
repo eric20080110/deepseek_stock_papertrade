@@ -1,11 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
-import { ChevronDown, ChevronRight, Zap, Star, Pencil, Check, X, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Zap, Star, Pencil, Check, X, Trash2, Eye } from 'lucide-react'
 import { useTaskStore } from '../../store/taskStore'
+import { ChampionDetailDrawer } from './ChampionDetailDrawer'
 
 interface Champion {
   sid: string
   strategy_id: string
   generation: number
+  idx: number
   cagr: number
   max_drawdown: number
   sharpe_ratio: number
@@ -20,6 +22,7 @@ interface Champion {
 
 interface GeneTask {
   task_id: string
+  task_name: string
   current_generation: number
   total_generations: number
   completed_at: number | null
@@ -43,6 +46,9 @@ export function GenePoolPanel() {
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
   const [editingName, setEditingName] = useState<Record<string, boolean>>({})
   const [draftNames, setDraftNames] = useState<Record<string, string>>({})
+  const [detailChampion, setDetailChampion] = useState<{ taskId: string; sid: string } | null>(null)
+  const [editingTaskName, setEditingTaskName] = useState<Record<string, boolean>>({})
+  const [draftTaskNames, setDraftTaskNames] = useState<Record<string, string>>({})
 
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
 
@@ -52,12 +58,20 @@ export function GenePoolPanel() {
 
   useEffect(() => { load() }, [load])
 
-  const toggleFavorite = async (sid: string, current: boolean) => {
-    await fetch(`/gene-pool/${sid}/favorite`, {
+  const toggleFavorite = (sid: string, current: boolean) => {
+    setData((prev) => prev.map((s) => ({
+      ...s,
+      tasks: (s.tasks || []).map((t) => ({
+        ...t,
+        champions: t.champions.map((c) =>
+          c.sid === sid ? { ...c, is_favorite: !current } : c
+        ),
+      })),
+    })))
+    fetch(`/gene-pool/${sid}/favorite`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_favorite: !current }),
     })
-    load()
   }
 
   const startRename = (sid: string, currentName: string) => {
@@ -75,6 +89,23 @@ export function GenePoolPanel() {
       load()
     }
     setEditingName((prev) => ({ ...prev, [sid]: false }))
+  }
+
+  const confirmTaskRename = async (taskId: string) => {
+    const name = draftTaskNames[taskId]?.trim()
+    if (name) {
+      await fetch(`/gene-pool/tasks/${taskId}/rename`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      setData((prev) => prev.map((s) => ({
+        ...s,
+        tasks: s.tasks.map((t) =>
+          t.task_id === taskId ? { ...t, task_name: name } : t
+        ),
+      })))
+    }
+    setEditingTaskName((prev) => ({ ...prev, [taskId]: false }))
   }
 
   const deleteChampion = async (sid: string) => {
@@ -99,7 +130,7 @@ export function GenePoolPanel() {
     } catch (e) { console.error(e) }
   }
 
-  const totalChampions = data.reduce((a, s) => a + s.tasks.reduce((b, t) => b + t.champions.length, 0), 0)
+  const totalChampions = data.reduce((a, s) => a + (s.tasks || []).reduce((b, t) => b + (t.champions || []).length, 0), 0)
 
   const toggleStrategy = (id: string) => {
     setExpandedStrategies((prev) => {
@@ -151,17 +182,43 @@ export function GenePoolPanel() {
                 </div>
               </button>
 
-              {isExpanded && strategy.tasks.map((task) => {
+              {isExpanded && (strategy.tasks || []).map((task) => {
                 const tExpanded = expandedTasks.has(task.task_id)
                 return (
                   <div key={task.task_id}>
                     <button onClick={() => toggleTask(task.task_id)}
                       className="w-full flex items-center justify-between px-6 py-2 hover:bg-gray-50 cursor-pointer border-t">
-                      <div className="flex items-center gap-2 text-sm">
-                        {tExpanded ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
-                        <span className="text-gray-700">{task.symbols.join(', ')}</span>
-                        <span className="text-xs text-gray-400">{task.timeframe}</span>
-                        <span className="text-xs text-gray-400">G{task.current_generation}/{task.total_generations}</span>
+                      <div className="flex items-center gap-2 text-sm flex-1 min-w-0">
+                        {tExpanded ? <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" /> : <ChevronRight className="w-3 h-3 text-gray-400 shrink-0" />}
+                        <div className="flex items-center gap-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+                          {editingTaskName[task.task_id] ? (
+                            <div className="flex items-center gap-1">
+                              <input type="text" value={draftTaskNames[task.task_id] || ''}
+                                onChange={(e) => setDraftTaskNames((prev) => ({ ...prev, [task.task_id]: e.target.value }))}
+                                onKeyDown={(e) => e.key === 'Enter' && confirmTaskRename(task.task_id)}
+                                className="w-28 px-1 py-0.5 text-xs border rounded" />
+                              <button onClick={() => confirmTaskRename(task.task_id)} className="cursor-pointer">
+                                <Check className="w-3 h-3 text-green-600" />
+                              </button>
+                              <button onClick={() => setEditingTaskName((prev) => ({ ...prev, [task.task_id]: false }))} className="cursor-pointer">
+                                <X className="w-3 h-3 text-red-500" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-gray-700 font-medium truncate">{task.task_name}</span>
+                              <button onClick={() => {
+                                setEditingTaskName((prev) => ({ ...prev, [task.task_id]: true }))
+                                setDraftTaskNames((prev) => ({ ...prev, [task.task_id]: task.task_name }))
+                              }} className="cursor-pointer">
+                                <Pencil className="w-3 h-3 text-gray-400 hover:text-gray-600 shrink-0" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        <span className="text-xs text-gray-400 shrink-0">{task.symbols.join(', ')}</span>
+                        <span className="text-xs text-gray-400 shrink-0">{task.timeframe}</span>
+                        <span className="text-xs text-gray-400 shrink-0">G{task.current_generation}/{task.total_generations}</span>
                       </div>
                     </button>
 
@@ -176,20 +233,21 @@ export function GenePoolPanel() {
                           <span>參數</span>
                           <span>操作</span>
                         </div>
-                        {task.champions.map((c) => (
+                        {(task.champions || []).map((c) => (
                           <div key={c.sid} className="grid grid-cols-8 gap-2 px-6 py-2 text-sm border-t hover:bg-gray-50 items-center">
                             <div className="col-span-2 flex items-center gap-1">
                               {editingName[c.sid] ? (
                                 <div className="flex items-center gap-1">
                                   <input type="text" value={draftNames[c.sid] || ''}
                                     onChange={(e) => setDraftNames((prev) => ({ ...prev, [c.sid]: e.target.value }))}
+                                    onKeyDown={(e) => e.key === 'Enter' && confirmRename(c.sid)}
                                     className="w-20 px-1 py-0.5 text-xs border rounded" />
                                   <button onClick={() => confirmRename(c.sid)} className="cursor-pointer"><Check className="w-3 h-3 text-green-600" /></button>
                                   <button onClick={() => setEditingName((prev) => ({ ...prev, [c.sid]: false }))} className="cursor-pointer"><X className="w-3 h-3 text-red-500" /></button>
                                 </div>
                               ) : (
                                 <>
-                                  <span className="text-xs font-mono">{c.custom_name || c.sid.slice(0, 10)}</span>
+                                  <span className="text-xs font-mono">{c.custom_name || `${task.task_name}-G${c.generation}-${c.idx}`}</span>
                                   <button onClick={() => startRename(c.sid, c.custom_name || '')} className="cursor-pointer">
                                     <Pencil className="w-3 h-3 text-gray-400 hover:text-gray-600" />
                                   </button>
@@ -199,10 +257,10 @@ export function GenePoolPanel() {
                                 <Star className={`w-3 h-3 ${c.is_favorite ? 'text-yellow-500 fill-yellow-500' : 'text-gray-300'}`} />
                               </button>
                             </div>
-                            <span className="text-green-600 font-mono text-xs">+{(c.cagr * 100).toFixed(0)}%</span>
-                            <span className="font-mono text-xs">{c.sharpe_ratio.toFixed(2)}</span>
-                            <span className="text-orange-600 font-mono text-xs">{c.max_drawdown.toFixed(1)}%</span>
-                            <span className="font-mono text-xs">{(c.win_rate * 100).toFixed(0)}%</span>
+                            <span className="text-green-600 font-mono text-xs">+{((c.cagr ?? 0) * 100).toFixed(0)}%</span>
+                            <span className="font-mono text-xs">{(c.sharpe_ratio ?? 0).toFixed(2)}</span>
+                            <span className="text-orange-600 font-mono text-xs">{(c.max_drawdown ?? 0).toFixed(1)}%</span>
+                            <span className="font-mono text-xs">{(c.win_rate ?? 0).toFixed(0)}%</span>
                             <span className="text-xs text-gray-500 truncate font-mono">
                               {(() => {
                                 try {
@@ -212,6 +270,10 @@ export function GenePoolPanel() {
                               })()}
                             </span>
                             <div className="flex gap-1">
+                              <button onClick={() => setDetailChampion({ taskId: task.task_id, sid: c.sid })}
+                                className="px-2 py-0.5 text-xs border border-gray-200 text-gray-600 rounded hover:bg-gray-50 cursor-pointer">
+                                <Eye className="w-3 h-3 inline-block" />
+                              </button>
                               <button onClick={() => deployPT(c)}
                                 className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer">
                                 <Zap className="w-3 h-3 inline-block" /> 跑盤
@@ -237,6 +299,14 @@ export function GenePoolPanel() {
           </div>
         )}
       </div>
+
+      {detailChampion && (
+        <ChampionDetailDrawer
+          taskId={detailChampion.taskId}
+          sid={detailChampion.sid}
+          onClose={() => setDetailChampion(null)}
+        />
+      )}
     </div>
   )
 }

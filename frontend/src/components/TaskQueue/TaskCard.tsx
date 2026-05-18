@@ -1,7 +1,7 @@
 import type { EvolutionTask } from '../../types/evolution'
 import { useTaskStore } from '../../store/taskStore'
 import { useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Pencil, Check, X } from 'lucide-react'
 
 const statusConfig: Record<string, { color: string; label: string }> = {
   QUEUED: { color: 'bg-gray-400', label: '排隊中' },
@@ -21,6 +21,20 @@ export function TaskCard({ task, onRefresh }: Props) {
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
   const setSelectedAnalysisTaskId = useTaskStore((s) => s.setSelectedAnalysisTaskId)
   const [deleting, setDeleting] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [draftName, setDraftName] = useState(task.name || '')
+
+  const confirmRename = async () => {
+    const name = draftName.trim()
+    if (name) {
+      await fetch(`/gene-pool/tasks/${task.task_id}/rename`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      useTaskStore.getState().updateTask(task.task_id, { name })
+    }
+    setEditingName(false)
+  }
 
   const handleCancel = async () => {
     await fetch(`/tasks/${task.task_id}`, { method: 'DELETE' })
@@ -43,9 +57,25 @@ export function TaskCard({ task, onRefresh }: Props) {
     <div className="flex items-center gap-4 p-4 border rounded-lg bg-white hover:shadow-sm transition-shadow">
       <span className={`w-3 h-3 rounded-full shrink-0 ${cfg.color}`} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm truncate">{task.config.strategy_config_id.slice(0, 12)}...</span>
-          <span className="text-xs text-gray-400">
+        <div className="flex items-center gap-2 min-w-0">
+          {editingName ? (
+            <div className="flex items-center gap-1 flex-1 min-w-0">
+              <input type="text" value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && confirmRename()}
+                className="flex-1 min-w-0 px-1 py-0.5 text-sm border rounded" />
+              <button onClick={confirmRename} className="cursor-pointer shrink-0"><Check className="w-3.5 h-3.5 text-green-600" /></button>
+              <button onClick={() => setEditingName(false)} className="cursor-pointer shrink-0"><X className="w-3.5 h-3.5 text-red-500" /></button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <span className="font-medium text-sm truncate">{task.name || task.task_id.slice(0, 12)}</span>
+              <button onClick={() => { setEditingName(true); setDraftName(task.name || '') }} className="cursor-pointer shrink-0">
+                <Pencil className="w-3 h-3 text-gray-400 hover:text-gray-600" />
+              </button>
+            </div>
+          )}
+          <span className="text-xs text-gray-400 shrink-0">
             {new Date(task.created_at * 1000).toLocaleString()}
           </span>
         </div>

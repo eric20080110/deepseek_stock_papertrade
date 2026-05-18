@@ -14,6 +14,7 @@ export interface TaskConfig {
 
 export interface EvolutionTask {
   task_id: string
+  name?: string | null
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
   created_at: number
   started_at: number | null
