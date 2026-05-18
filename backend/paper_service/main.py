@@ -88,10 +88,30 @@ def tick_debug(instance_id: str = ""):
     }
     if instance_id:
         try:
+            from paper_trading.engine import PaperTradingEngine
+            info["engine_class_file"] = sys.modules.get("paper_trading.engine").__file__
+        except:
+            pass
+        try:
+            from paper_trading.models import CreateInstanceRequest
+            from paper_trading.models import SourceType
+            info["engine_methods"] = {
+                "has_get_instance": hasattr(engine, "get_instance"),
+                "has_ensure_context": hasattr(engine, "_ensure_context"),
+                "instance_found": engine.get_instance(instance_id) is not None,
+            }
+            if hasattr(engine, "_ensure_context"):
+                engine._ensure_context(instance_id)
+                info["after_ensure"] = instance_id in engine._running_instances
+                info["running_keys"] = list(engine._running_instances.keys())
+        except Exception as e:
+            info["initialization_error"] = str(e)
+            info["traceback"] = traceback.format_exc()
+        try:
             result = engine.tick(instance_id)
             info["tick_result"] = result
             info["in_running"] = instance_id in engine._running_instances
         except Exception as e:
             info["tick_error"] = str(e)
-            info["traceback"] = traceback.format_exc()
+            info["tick_traceback"] = traceback.format_exc()
     return info
