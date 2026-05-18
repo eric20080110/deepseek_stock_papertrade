@@ -46,6 +46,7 @@ def health():
 def tick_all():
     instances = engine.list_instances()
     count = 0
+    errors = []
     for inst in instances:
         if inst.status == InstanceStatus.RUNNING:
             try:
@@ -54,4 +55,28 @@ def tick_all():
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning("tick %s error: %s", inst.instance_id, e)
-    return {"ticked": count, "total_instances": len(instances)}
+                errors.append({"instance_id": inst.instance_id, "error": str(e)})
+    return {"ticked": count, "total_instances": len(instances), "errors": errors}
+
+
+@app.get("/debug/engine")
+def debug_engine():
+    import sys
+    instances = engine.list_instances()
+    result = {
+        "engine_type": type(engine).__name__,
+        "engine_module": type(engine).__module__,
+        "running_instances": list(engine._running_instances.keys()) if hasattr(engine, '_running_instances') else [],
+        "instances": len(instances),
+        "python": sys.version,
+    }
+    return result
+
+@app.get("/debug/tick-test/{instance_id}")
+def debug_tick(instance_id: str):
+    import traceback
+    try:
+        result = engine.tick(instance_id)
+        return {"result": result, "running": instance_id in engine._running_instances}
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
