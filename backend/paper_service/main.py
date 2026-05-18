@@ -36,10 +36,21 @@ app.include_router(pt_router)
 
 @app.get("/health")
 def health():
-    import os
+    import os, sys
     configured = bool(os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"))
     count = len(engine.list_instances()) if configured else 0
-    return {"status": "ok", "instances": count, "turso_configured": configured}
+    return {
+        "status": "ok",
+        "instances": count,
+        "turso_configured": configured,
+        "debug": {
+            "engine_type": type(engine).__name__,
+            "engine_module": type(engine).__module__,
+            "running_keys": list(engine._running_instances.keys()) if hasattr(engine, '_running_instances') else [],
+            "python": sys.version,
+            "routes": [r.path for r in app.routes],
+        },
+    }
 
 
 @app.post("/tick")
@@ -59,24 +70,22 @@ def tick_all():
     return {"ticked": count, "total_instances": len(instances), "errors": errors}
 
 
-@app.get("/debug/engine")
-def debug_engine():
-    import sys
-    instances = engine.list_instances()
-    result = {
-        "engine_type": type(engine).__name__,
+@app.post("/tick-debug")
+def tick_debug(instance_id: str = ""):
+    import traceback, sys
+    info = {
+        "engine": type(engine).__name__,
         "engine_module": type(engine).__module__,
-        "running_instances": list(engine._running_instances.keys()) if hasattr(engine, '_running_instances') else [],
-        "instances": len(instances),
+        "running_keys": list(engine._running_instances.keys()) if hasattr(engine, '_running_instances') else [],
         "python": sys.version,
+        "app_routes": [r.path for r in app.routes],
     }
-    return result
-
-@app.get("/debug/tick-test/{instance_id}")
-def debug_tick(instance_id: str):
-    import traceback
-    try:
-        result = engine.tick(instance_id)
-        return {"result": result, "running": instance_id in engine._running_instances}
-    except Exception as e:
-        return {"error": str(e), "traceback": traceback.format_exc()}
+    if instance_id:
+        try:
+            result = engine.tick(instance_id)
+            info["tick_result"] = result
+            info["in_running"] = instance_id in engine._running_instances
+        except Exception as e:
+            info["tick_error"] = str(e)
+            info["traceback"] = traceback.format_exc()
+    return info
