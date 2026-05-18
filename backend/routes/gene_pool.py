@@ -8,6 +8,14 @@ from database import get_db, get_turso
 router = APIRouter(prefix="/gene-pool", tags=["gene_pool"])
 
 
+def _remote_conn():
+    """Return (conn, is_remote). Falls back to local SQLite when Turso unavailable."""
+    try:
+        return get_turso(), True
+    except Exception:
+        return get_db(), False
+
+
 class AnnotationPayload(BaseModel):
     is_favorite: Optional[bool] = None
     custom_name: Optional[str] = None
@@ -20,10 +28,10 @@ def _get_annotations(conn) -> dict[str, dict]:
 
 @router.get("")
 def gene_pool(favorites_only: bool = Query(False)):
-    t = get_turso()
-    annotations = _get_annotations(t)
+    remote, is_remote = _remote_conn()
+    annotations = _get_annotations(remote)
 
-    strategies = t.execute(
+    strategies = remote.execute(
         "SELECT * FROM strategy_configs ORDER BY is_template DESC, name ASC"
     ).fetchall()
 
@@ -87,8 +95,8 @@ def gene_pool(favorites_only: bool = Query(False)):
 
 @router.put("/annotations/{strategy_id}")
 def update_annotation(strategy_id: str, payload: AnnotationPayload):
-    t = get_turso()
-    existing = t.execute(
+    conn, is_remote = _remote_conn()
+    existing = conn.execute(
         "SELECT * FROM gene_favorites WHERE strategy_id = ?", (strategy_id,)
     ).fetchone()
     now = int(time.time())
@@ -98,19 +106,18 @@ def update_annotation(strategy_id: str, payload: AnnotationPayload):
             d["is_favorite"] = 1 if payload.is_favorite else 0
         if payload.custom_name is not None:
             d["custom_name"] = payload.custom_name
-        d["updated_at"] = now
-        t.execute(
-            """UPDATE gene_favorites SET is_favorite=?, custom_name=?, updated_at=?
-               WHERE strategy_id=?""",
+        conn.execute(
+            "UPDATE gene_favorites SET is_favorite=?, custom_name=?, updated_at=? WHERE strategy_id=?",
             (d["is_favorite"], d["custom_name"], now, strategy_id),
         )
     else:
-        t.execute(
-            """INSERT INTO gene_favorites (strategy_id, task_id, custom_name, is_favorite, updated_at)
-               VALUES (?, '', ?, ?, ?)""",
-            (strategy_id, payload.custom_name or "",
-             1 if payload.is_favorite else 0, now),
+        conn.execute(
+            "INSERT INTO gene_favorites (strategy_id, task_id, custom_name, is_favorite, updated_at) VALUES (?, '', ?, ?, ?)",
+            (strategy_id, payload.custom_name or "", 1 if payload.is_favorite else 0, now),
         )
+    if not is_remote:
+        conn.commit()
+        conn.close()
     return {"ok": True}
 
 
@@ -120,8 +127,11 @@ def delete_individual(strategy_id: str):
     local.execute("DELETE FROM individuals WHERE strategy_id = ?", (strategy_id,))
     local.commit()
     local.close()
-    t = get_turso()
-    t.execute("DELETE FROM gene_favorites WHERE strategy_id = ?", (strategy_id,))
+    conn, is_remote = _remote_conn()
+    conn.execute("DELETE FROM gene_favorites WHERE strategy_id = ?", (strategy_id,))
+    if not is_remote:
+        conn.commit()
+        conn.close()
     return {"detail": "Individual deleted"}
 
 
@@ -143,43 +153,49 @@ def rename_task(task_id: str, payload: RenameTaskPayload):
 
 @router.put("/{strategy_id}/favorite")
 def set_favorite(strategy_id: str, payload: AnnotationPayload):
-    t = get_turso()
-    existing = t.execute(
+    conn, is_remote = _remote_conn()
+    existing = conn.execute(
         "SELECT * FROM gene_favorites WHERE strategy_id = ?", (strategy_id,)
     ).fetchone()
     now = int(time.time())
     val = 1 if (payload.is_favorite or False) else 0
     if existing:
-        t.execute(
+        conn.execute(
             "UPDATE gene_favorites SET is_favorite=?, updated_at=? WHERE strategy_id=?",
             (val, now, strategy_id),
         )
     else:
-        t.execute(
+        conn.execute(
             "INSERT INTO gene_favorites (strategy_id, task_id, custom_name, is_favorite, updated_at) VALUES (?, '', '', ?, ?)",
             (strategy_id, val, now),
         )
+    if not is_remote:
+        conn.commit()
+        conn.close()
     return {"ok": True}
 
 
 @router.put("/{strategy_id}/rename")
 def rename_individual(strategy_id: str, payload: AnnotationPayload):
-    t = get_turso()
+    conn, is_remote = _remote_conn()
     name = payload.custom_name or ""
-    existing = t.execute(
+    existing = conn.execute(
         "SELECT * FROM gene_favorites WHERE strategy_id = ?", (strategy_id,)
     ).fetchone()
     now = int(time.time())
     if existing:
-        t.execute(
+        conn.execute(
             "UPDATE gene_favorites SET custom_name=?, updated_at=? WHERE strategy_id=?",
             (name, now, strategy_id),
         )
     else:
-        t.execute(
+        conn.execute(
             "INSERT INTO gene_favorites (strategy_id, task_id, custom_name, is_favorite, updated_at) VALUES (?, '', ?, 0, ?)",
             (strategy_id, name, now),
         )
+    if not is_remote:
+        conn.commit()
+        conn.close()
     return {"ok": True}
 
 
@@ -189,6 +205,9 @@ def delete_champion(strategy_id: str):
     local.execute("DELETE FROM individuals WHERE strategy_id = ?", (strategy_id,))
     local.commit()
     local.close()
-    t = get_turso()
-    t.execute("DELETE FROM gene_favorites WHERE strategy_id = ?", (strategy_id,))
+    conn, is_remote = _remote_conn()
+    conn.execute("DELETE FROM gene_favorites WHERE strategy_id = ?", (strategy_id,))
+    if not is_remote:
+        conn.commit()
+        conn.close()
     return {"detail": "Champion deleted"}

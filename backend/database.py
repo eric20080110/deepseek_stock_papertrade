@@ -255,6 +255,65 @@ CREATE TABLE IF NOT EXISTS ohlcv_data (
     created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
     PRIMARY KEY (symbol, timeframe, timestamp)
 );
+CREATE TABLE IF NOT EXISTS gene_favorites (
+    strategy_id TEXT PRIMARY KEY,
+    task_id     TEXT NOT NULL DEFAULT '',
+    custom_name TEXT DEFAULT '',
+    is_favorite INTEGER DEFAULT 0,
+    notes       TEXT DEFAULT '',
+    updated_at  INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS paper_instances (
+    instance_id         TEXT PRIMARY KEY,
+    name                TEXT NOT NULL,
+    source              TEXT NOT NULL DEFAULT 'manual',
+    source_task_id      TEXT,
+    source_individual_id TEXT,
+    strategy_config_id  TEXT NOT NULL,
+    params_json         TEXT NOT NULL DEFAULT '{}',
+    symbols             TEXT NOT NULL DEFAULT '[]',
+    initial_capital     REAL DEFAULT 10000,
+    status              TEXT NOT NULL DEFAULT 'INITIALIZING',
+    started_at          INTEGER NOT NULL,
+    stopped_at          INTEGER,
+    timeframe           TEXT DEFAULT '1d',
+    total_equity        REAL DEFAULT 0,
+    total_return        REAL DEFAULT 0,
+    unrealized_pnl      REAL DEFAULT 0,
+    realized_pnl        REAL DEFAULT 0,
+    trade_count         INTEGER DEFAULT 0,
+    win_rate            REAL DEFAULT 0,
+    max_drawdown        REAL DEFAULT 0,
+    auto_tick           INTEGER DEFAULT 0,
+    tick_interval_sec   INTEGER DEFAULT 10
+);
+CREATE TABLE IF NOT EXISTS virtual_positions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id     TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    side            TEXT DEFAULT 'flat',
+    entry_price     REAL DEFAULT 0,
+    entry_time      INTEGER DEFAULT 0,
+    quantity        REAL DEFAULT 0,
+    current_price   REAL DEFAULT 0,
+    unrealized_pnl  REAL DEFAULT 0,
+    unrealized_pnl_pct REAL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_positions_inst ON virtual_positions(instance_id, symbol);
+CREATE TABLE IF NOT EXISTS virtual_trades (
+    trade_id        TEXT PRIMARY KEY,
+    instance_id     TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    side            TEXT NOT NULL,
+    price           REAL DEFAULT 0,
+    quantity        REAL DEFAULT 0,
+    fee             REAL DEFAULT 0,
+    realized_pnl    REAL,
+    signal_time     INTEGER NOT NULL,
+    executed_time   INTEGER NOT NULL,
+    trigger_reason  TEXT DEFAULT 'strategy_signal'
+);
+CREATE INDEX IF NOT EXISTS idx_trades_inst ON virtual_trades(instance_id, signal_time);
 """
 
 _TURSO_SCHEMA = """
@@ -322,6 +381,13 @@ CREATE TABLE IF NOT EXISTS virtual_trades (
     trigger_reason  TEXT DEFAULT 'strategy_signal'
 );
 CREATE INDEX IF NOT EXISTS idx_trades_inst ON virtual_trades(instance_id, signal_time);
+CREATE TABLE IF NOT EXISTS paper_equity_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id TEXT NOT NULL,
+    timestamp   INTEGER NOT NULL,
+    equity      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_equity_hist ON paper_equity_history(instance_id, timestamp);
 CREATE TABLE IF NOT EXISTS gene_favorites (
     strategy_id     TEXT PRIMARY KEY,
     task_id         TEXT NOT NULL,

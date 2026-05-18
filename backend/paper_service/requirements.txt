@@ -4,3 +4,4 @@ pydantic>=2.9
 requests>=2.31
 pandas>=2.0
 numpy>=1.26
+pyarrow>=14.0

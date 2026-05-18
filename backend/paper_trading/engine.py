@@ -1,17 +1,19 @@
 import json
 import time
 import uuid
-import random
-import numpy as np
-import pandas as pd
 from typing import Optional
 
-from database import get_turso as get_db
+from database import get_turso as _get_turso, get_db as _get_local
 from paper_trading.models import (
-    PaperInstance, VirtualPosition, VirtualTrade,
-    InstanceStatus, SourceType, CreateInstanceRequest,
+    PaperInstance, InstanceStatus, SourceType, CreateInstanceRequest,
 )
-from backtest.engine import run_symbol_backtest
+
+
+def get_db():
+    try:
+        return _get_turso()
+    except Exception:
+        return _get_local()
 
 
 class PaperTradingEngine:
@@ -33,14 +35,15 @@ class PaperTradingEngine:
             """INSERT INTO paper_instances
                (instance_id, name, source, source_task_id, source_individual_id,
                 strategy_config_id, params_json, symbols, initial_capital,
-                status, started_at, timeframe)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'INITIALIZING', ?, ?)""",
+                status, started_at, timeframe, auto_tick, tick_interval_sec)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'INITIALIZING', ?, ?, ?, ?)""",
             (
                 instance_id, req.name, req.source.value,
                 req.source_task_id, req.source_individual_id,
                 req.strategy_config_id, json.dumps(req.params),
                 json.dumps(req.symbols), req.initial_capital,
                 now, req.timeframe,
+                1 if req.auto_tick else 0, req.tick_interval_sec,
             ),
         )
         conn.commit()
@@ -101,9 +104,11 @@ class PaperTradingEngine:
         return True
 
     def delete_instance(self, instance_id: str):
+        self._running_instances.pop(instance_id, None)
         conn = get_db()
         conn.execute("DELETE FROM virtual_trades WHERE instance_id = ?", (instance_id,))
         conn.execute("DELETE FROM virtual_positions WHERE instance_id = ?", (instance_id,))
+        conn.execute("DELETE FROM paper_equity_history WHERE instance_id = ?", (instance_id,))
         conn.execute("DELETE FROM paper_instances WHERE instance_id = ?", (instance_id,))
         conn.commit()
         conn.close()
@@ -126,43 +131,83 @@ class PaperTradingEngine:
         symbols = json.loads(inst.symbols) if isinstance(inst.symbols, str) else inst.symbols
         params = json.loads(inst.params_json) if isinstance(inst.params_json, str) else inst.params_json
         sid = inst.strategy_config_id
-        from database import get_turso as db2
-        conn = db2()
+        conn = get_db()
         row = conn.execute(
             "SELECT template_id FROM strategy_configs WHERE config_id = ?", (sid,)
         ).fetchone()
         conn.close()
         template_id = row["template_id"] if row else sid
 
-        timeframe = inst.timeframe or "1d"
-        data_map = {}
+        conn = get_db()
         for sym in symbols:
-            from backtest.data_cache import DATA_CACHE
-            df = DATA_CACHE.ensure(sym, timeframe=timeframe)
-            if df is not None:
-                data_map[sym] = df
-
-        for sym in symbols:
-            conn = get_db()
             conn.execute(
-                """INSERT INTO virtual_positions
-                   (instance_id, symbol, side) VALUES (?, ?, 'flat')""",
+                "INSERT OR IGNORE INTO virtual_positions (instance_id, symbol, side) VALUES (?, ?, 'flat')",
                 (instance_id, sym),
             )
-            conn.commit()
-            conn.close()
+        conn.commit()
+        conn.close()
 
-        max_bars = len(list(data_map.values())[0]) if data_map else 500
         self.update_instance(instance_id, status="RUNNING")
         self._running_instances[instance_id] = {
             "template_id": template_id,
             "params": params,
             "symbols": symbols,
-            "data_map": data_map,
-            "bar_idx": 0,
-            "max_bars": max_bars,
-            "equity_history": [],
+            "timeframe": inst.timeframe or "1d",
         }
+
+    def _ensure_context(self, instance_id: str):
+        inst = self.get_instance(instance_id)
+        if not inst:
+            raise ValueError(f"Instance {instance_id} not found")
+        symbols = json.loads(inst.symbols) if isinstance(inst.symbols, str) else inst.symbols
+        params = json.loads(inst.params_json) if isinstance(inst.params_json, str) else inst.params_json
+
+        conn = get_db()
+        row = conn.execute(
+            "SELECT template_id FROM strategy_configs WHERE config_id = ?", (inst.strategy_config_id,)
+        ).fetchone()
+        conn.close()
+        template_id = row["template_id"] if row else inst.strategy_config_id
+
+        self._running_instances[instance_id] = {
+            "template_id": template_id,
+            "params": params,
+            "symbols": symbols,
+            "timeframe": inst.timeframe or "1d",
+        }
+
+    _BAR_SEC = {"1d": 86400, "1h": 3600, "30m": 1800, "15m": 900, "5m": 300, "1m": 60}
+
+    def _get_fresh_data(self, sym: str, timeframe: str):
+        from backtest.data_cache import DATA_CACHE
+        bar_sec = self._BAR_SEC.get(timeframe, 86400)
+        now = int(time.time())
+        df = DATA_CACHE.ensure(sym, timeframe=timeframe)
+        if df is not None and len(df) > 0:
+            if now - int(df.index[-1]) <= bar_sec * 2:
+                return df
+        return DATA_CACHE.ensure(sym, timeframe=timeframe, force_refresh=True)
+
+    def _save_equity_point(self, instance_id: str, ts: int, equity: float):
+        ctx = self._running_instances.get(instance_id)
+        timeframe = ctx.get("timeframe", "1d") if ctx else "1d"
+        bar_sec = self._BAR_SEC.get(timeframe, 86400)
+        min_interval = max(bar_sec // 6, 60)
+        last_save = ctx.get("_last_equity_ts", 0) if ctx else 0
+        if ts - last_save < min_interval:
+            return
+        try:
+            conn = get_db()
+            conn.execute(
+                "INSERT INTO paper_equity_history (instance_id, timestamp, equity) VALUES (?, ?, ?)",
+                (instance_id, ts, round(equity, 2)),
+            )
+            conn.commit()
+            conn.close()
+            if ctx is not None:
+                ctx["_last_equity_ts"] = ts
+        except Exception:
+            pass
 
     def tick(self, instance_id: str) -> Optional[dict]:
         inst = self.get_instance(instance_id)
@@ -178,19 +223,16 @@ class PaperTradingEngine:
         ctx = self._running_instances.get(instance_id)
         if not ctx:
             return None
+
         symbols = ctx["symbols"]
         params = ctx["params"]
         template_id = ctx["template_id"]
-        data_map = ctx["data_map"]
-        idx = ctx["bar_idx"]
+        timeframe = ctx.get("timeframe", inst.timeframe or "1d")
 
         events = []
         for sym in symbols:
-            df = data_map.get(sym)
-            if df is None or idx >= len(df):
-                continue
-            bar = df.iloc[:idx]
-            if len(bar) < 50:
+            df = self._get_fresh_data(sym, timeframe)
+            if df is None or len(df) < 50:
                 continue
 
             from strategies.base import get_strategy_module
@@ -198,12 +240,12 @@ class PaperTradingEngine:
             if mod is None:
                 continue
             try:
-                signals = mod.generate_signals(bar, params)
+                signals = mod.generate_signals(df, params)
                 signal = int(signals.iloc[-1])
             except Exception:
                 signal = 0
 
-            latest_price = float(df.iloc[idx]["open"])
+            latest_price = float(df.iloc[-1]["close"])
             pos = self._get_position(instance_id, sym)
             current_side = pos["side"] if pos else "flat"
 
@@ -213,18 +255,16 @@ class PaperTradingEngine:
                     events.append({"type": "close", "symbol": sym, "price": latest_price, "reason": "signal"})
                     current_side = "flat"
 
-                entry = latest_price * (1.001 if signal == 1 else 0.999)
-                self._open_position(instance_id, sym, signal, entry, params.get("initial_capital", 10000))
-                events.append({"type": "open", "symbol": sym, "side": "long" if signal == 1 else "short", "price": entry})
+                per_sym_capital = inst.initial_capital / max(len(symbols), 1)
+                self._open_position(instance_id, sym, signal, latest_price, per_sym_capital)
+                events.append({"type": "open", "symbol": sym, "side": "long" if signal == 1 else "short", "price": latest_price})
 
             self._update_position_price(instance_id, sym, latest_price)
 
-        ctx["bar_idx"] = idx + 1
         total_equity = self._compute_total_equity(instance_id)
         self._update_instance_metrics(instance_id, total_equity)
-        first_sym = symbols[0] if symbols else None
-        ts = int(data_map[first_sym].index[idx]) if first_sym and first_sym in data_map and idx < len(data_map[first_sym]) else int(time.time())
-        ctx.setdefault("equity_history", []).append({"time": ts, "equity": total_equity})
+        ts = int(time.time())
+        self._save_equity_point(instance_id, ts, total_equity)
         return {"instance_id": instance_id, "total_equity": total_equity, "events": events}
 
     def _get_position(self, instance_id: str, symbol: str) -> Optional[dict]:
@@ -378,8 +418,16 @@ class PaperTradingEngine:
         return [dict(r) for r in rows]
 
     def get_equity_history(self, instance_id: str) -> list[dict]:
-        ctx = self._running_instances.get(instance_id)
-        return ctx.get("equity_history", []) if ctx else []
+        try:
+            conn = get_db()
+            rows = conn.execute(
+                "SELECT timestamp, equity FROM paper_equity_history WHERE instance_id = ? ORDER BY timestamp ASC",
+                (instance_id,),
+            ).fetchall()
+            conn.close()
+            return [{"time": r["timestamp"], "equity": r["equity"]} for r in rows]
+        except Exception:
+            return []
 
     def get_trades(self, instance_id: str, limit: int = 100) -> list[dict]:
         conn = get_db()

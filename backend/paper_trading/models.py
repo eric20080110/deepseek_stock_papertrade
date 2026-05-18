@@ -77,3 +77,5 @@ class CreateInstanceRequest(BaseModel):
     symbols: list[str]
     initial_capital: float = 10_000.0
     timeframe: str = "1d"
+    auto_tick: bool = True
+    tick_interval_sec: int = 10
