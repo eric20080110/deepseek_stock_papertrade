@@ -90,11 +90,32 @@ class PaperTradingEngine:
             conn.commit(); conn.close()
         max_bars = len(list(data_map.values())[0]) if data_map else 500
         self.update_instance(instance_id, status="RUNNING")
-        self._running_instances[instance_id] = {"template_id": template_id, "params": params, "symbols": symbols, "data_map": data_map, "bar_idx": 0, "max_bars": max_bars}
+        self._running_instances[instance_id] = {"template_id": template_id, "params": params, "symbols": symbols, "data_map": data_map, "bar_idx": 0, "max_bars": max_bars, "timeframe": timeframe}
+
+    def _ensure_context(self, instance_id: str):
+        if instance_id in self._running_instances: return
+        inst = self.get_instance(instance_id)
+        if not inst or inst.status != InstanceStatus.RUNNING: return
+        symbols = json.loads(inst.symbols) if isinstance(inst.symbols, str) else inst.symbols
+        params = json.loads(inst.params_json) if isinstance(inst.params_json, str) else inst.params_json
+        conn = get_db()
+        row = conn.execute("SELECT template_id FROM strategy_configs WHERE config_id = ?", (inst.strategy_config_id,)).fetchone()
+        conn.close()
+        template_id = row["template_id"] if row else inst.strategy_config_id
+        timeframe = inst.timeframe or "1d"
+        data_map = {}
+        for sym in symbols:
+            from backtest.data_cache import DATA_CACHE
+            df = DATA_CACHE.ensure(sym, timeframe=timeframe)
+            if df is not None: data_map[sym] = df
+        max_bars = len(list(data_map.values())[0]) if data_map else 500
+        self._running_instances[instance_id] = {"template_id": template_id, "params": params, "symbols": symbols, "data_map": data_map, "bar_idx": max(max_bars - 1, 0), "max_bars": max_bars, "timeframe": timeframe}
 
     def tick(self, instance_id: str) -> Optional[dict]:
         inst = self.get_instance(instance_id)
         if not inst or inst.status != InstanceStatus.RUNNING: return None
+        if instance_id not in self._running_instances:
+            self._ensure_context(instance_id)
         ctx = self._running_instances.get(instance_id)
         if not ctx: return None
         symbols, params, template_id, data_map = ctx["symbols"], ctx["params"], ctx["template_id"], ctx["data_map"]
