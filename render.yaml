@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: quantgene-paper-trading
+    env: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: TURSO_URL
+        sync: false
+      - key: TURSO_TOKEN
+        sync: false
+    healthCheckPath: /health
