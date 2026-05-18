@@ -43,7 +43,7 @@ def tick_all():
     instances = engine.list_instances()
     count = 0
     for inst in instances:
-        if inst.status == InstanceStatus.RUNNING and inst.auto_tick:
+        if inst.status == InstanceStatus.RUNNING:
             try:
                 engine.tick(inst.instance_id)
                 count += 1
