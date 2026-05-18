@@ -1,6 +1,10 @@
 import pandas as pd
 from typing import Optional
 
+from .parquet_cache import get as pq_get, put as pq_put
+
+_MAX_AGE = {"1m": 120, "5m": 600, "15m": 1800, "30m": 3600, "1h": 7200, "1d": 86400}
+
 
 class DataCache:
     def __init__(self):
@@ -17,12 +21,22 @@ class DataCache:
         if self._estimated_size() > self._max_bytes:
             self._evict_lru()
         self._cache[self._key(symbol, timeframe)] = df
+        if timeframe:
+            pq_put(symbol, timeframe, df)
 
     def has(self, symbol: str, timeframe: Optional[str] = None) -> bool:
-        return self._key(symbol, timeframe) in self._cache
+        if self._key(symbol, timeframe) in self._cache:
+            return True
+        if timeframe:
+            from .parquet_cache import stale
+            return not stale(symbol, timeframe)
+        return False
 
     def remove(self, symbol: str, timeframe: Optional[str] = None):
         self._cache.pop(self._key(symbol, timeframe), None)
+        if timeframe:
+            from .parquet_cache import remove as pq_remove
+            pq_remove(symbol, timeframe)
 
     def clear(self):
         self._cache.clear()
@@ -57,9 +71,11 @@ class DataCache:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         timeframe: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> Optional[pd.DataFrame]:
+        # 1. Check in-memory cache (fastest)
         df = self.load(symbol, timeframe)
-        if df is not None:
+        if df is not None and not force_refresh:
             if start_date and end_date and timeframe:
                 if self._stale(df, end_date, timeframe):
                     df = None
@@ -71,12 +87,30 @@ class DataCache:
             if df is not None:
                 return df
 
-        if timeframe:
-            from data_fetcher import fetch_ohlcv
-            fetched = fetch_ohlcv(symbol, timeframe, start_date or "", end_date or "")
-            if fetched is not None:
-                self.store(symbol, fetched, timeframe)
-                return fetched
+        if not timeframe:
+            return None
+
+        # 2. Check parquet cache (persistent, cross-process)
+        from .parquet_cache import get as pq_get, stale as pq_stale_fn
+
+        max_age = _MAX_AGE.get(timeframe, 86400)
+        if not force_refresh and not pq_stale_fn(symbol, timeframe, max_age):
+            pq_df = pq_get(symbol, timeframe)
+            if pq_df is not None:
+                self.store(symbol, pq_df, timeframe)
+                if start_date and end_date:
+                    lo, hi = self._ts(start_date), self._ts(end_date)
+                    pq_df = pq_df[(pq_df.index >= lo) & (pq_df.index <= hi)]
+                return pq_df if not pq_df.empty else None
+
+        # 3. Fetch from remote (Binance or synthetic)
+        from data_fetcher import fetch_ohlcv, force_refresh as _force_fetch
+
+        fetched = _force_fetch(symbol, timeframe, start_date or "", end_date or "") if force_refresh \
+            else fetch_ohlcv(symbol, timeframe, start_date or "", end_date or "")
+        if fetched is not None:
+            self.store(symbol, fetched, timeframe)
+            return fetched
 
         return None
 

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Header } from './components/Layout/Header'
 import { Sidebar } from './components/Layout/Sidebar'
 import { MainContent } from './components/Layout/MainContent'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useTaskStore } from './store/taskStore'
 
 function App() {
@@ -17,13 +18,15 @@ function App() {
   }, [])
 
   return (
-    <div className="h-screen flex flex-col">
-      <Header />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <MainContent />
+    <ErrorBoundary>
+      <div className="h-screen flex flex-col">
+        <Header />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar />
+          <MainContent />
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   )
 }
 

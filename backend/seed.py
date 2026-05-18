@@ -92,15 +92,31 @@ TEMPLATES = [
 
 def seed_templates():
     init_db()
-    t = get_turso()
-    existing = t.execute("SELECT COUNT(*) FROM strategy_configs WHERE is_template = 1").fetchone()[0]
-    if existing > 0:
+    try:
+        t = get_turso()
+        existing = t.execute("SELECT COUNT(*) FROM strategy_configs WHERE is_template = 1").fetchone()[0]
+        if existing > 0:
+            sync_strategies_to_local()
+            return
+        _seed_into(t)
         sync_strategies_to_local()
-        return
+    except RuntimeError:
+        from database import get_db as _get_local
+        local = _get_local()
+        existing = local.execute("SELECT COUNT(*) FROM strategy_configs WHERE is_template = 1").fetchone()[0]
+        if existing > 0:
+            local.close()
+            return
+        _seed_into(local)
+        local.commit()
+        local.close()
+
+
+def _seed_into(dest):
     now = int(time.time())
     for tmpl in TEMPLATES:
         config_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"template/{tmpl['template_id']}"))
-        t.execute(
+        dest.execute(
             """INSERT INTO strategy_configs
                (config_id, name, description, template_id, is_template, is_locked,
                 parameters_json, constraints_json, created_at, updated_at)
@@ -116,4 +132,3 @@ def seed_templates():
                 now,
             ),
         )
-    sync_strategies_to_local()

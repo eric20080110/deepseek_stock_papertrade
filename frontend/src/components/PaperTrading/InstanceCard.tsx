@@ -62,16 +62,20 @@ export function InstanceCard({ instance, onView }: Props) {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mt-4">
+      <div className="grid grid-cols-3 gap-2 mt-4">
         <div>
           <div className="text-xs text-gray-400">總報酬率</div>
-          <div className={`text-lg font-bold ${instance.total_return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+          <div className={`text-base font-bold ${instance.total_return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
             {instance.total_return >= 0 ? '+' : ''}{instance.total_return?.toFixed(2)}%
           </div>
         </div>
         <div>
           <div className="text-xs text-gray-400">交易次數</div>
-          <div className="text-lg font-bold">{instance.trade_count}</div>
+          <div className="text-base font-bold">{instance.trade_count}</div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-400">精度</div>
+          <div className="text-base font-bold">{instance.timeframe || '-'}</div>
         </div>
       </div>
 

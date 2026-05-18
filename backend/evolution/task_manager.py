@@ -153,7 +153,10 @@ class TaskManager:
                 1 if ind.get("passed_absolute") else 0,
                 1 if ind.get("passed_dynamic") else 0,
                 ind.get("elimination_reason"),
-                json.dumps(ind.get("equity_curve", [])) if ind.get("equity_curve") else None,
+                json.dumps({
+                    "v": ind.get("equity_curve", []),
+                    "t": ind.get("equity_timestamps", []),
+                }) if ind.get("equity_curve") else None,
                 json.dumps(ind.get("symbol_results", {})) if ind.get("symbol_results") else None,
             ))
         conn.executemany(

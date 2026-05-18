@@ -114,20 +114,34 @@ export function GenePoolPanel() {
     load()
   }
 
-  const deployPT = async (c: Champion) => {
+  const deployPT = async (c: Champion, task: GeneTask) => {
     try {
       const params = JSON.parse(c.params_json || '{}')
       const res = await fetch('/paper-trading', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          strategy_id: c.strategy_id,
-          symbol: c.sid?.split('-')[0] || 'BTCUSDT',
-          capital: 10000,
-          params_json: JSON.stringify(params),
+          name: c.custom_name || `${task.task_name}-G${c.generation}-${c.idx}`,
+          source: 'evolution',
+          source_task_id: task.task_id,
+          source_individual_id: c.sid,
+          strategy_config_id: c.strategy_id,
+          params,
+          symbols: task.symbols,
+          initial_capital: 10000,
+          timeframe: task.timeframe,
         }),
       })
-      if (res.ok) { alert('已部署至模擬跑盤！'); setCurrentView('paper-trading') }
-    } catch (e) { console.error(e) }
+      if (res.ok) {
+        alert('已部署至模擬跑盤！')
+        setCurrentView('paper-trading')
+      } else {
+        const errBody = await res.text()
+        alert(`部署失敗 (${res.status}): ${errBody}`)
+      }
+    } catch (e) {
+      console.error(e)
+      alert('部署失敗: ' + String(e))
+    }
   }
 
   const totalChampions = data.reduce((a, s) => a + (s.tasks || []).reduce((b, t) => b + (t.champions || []).length, 0), 0)
@@ -274,7 +288,7 @@ export function GenePoolPanel() {
                                 className="px-2 py-0.5 text-xs border border-gray-200 text-gray-600 rounded hover:bg-gray-50 cursor-pointer">
                                 <Eye className="w-3 h-3 inline-block" />
                               </button>
-                              <button onClick={() => deployPT(c)}
+                              <button onClick={() => deployPT(c, task)}
                                 className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer">
                                 <Zap className="w-3 h-3 inline-block" /> 跑盤
                               </button>

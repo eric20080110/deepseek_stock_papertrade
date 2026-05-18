@@ -1,12 +1,16 @@
 import os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add both this dir and the parent backend dir for imports
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_BACKEND_DIR = os.path.join(_THIS_DIR, "..")
+sys.path.insert(0, _BACKEND_DIR)
+sys.path.insert(0, _THIS_DIR)
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db, get_turso
 from engine_state import engine
-from paper_trading.ticker import PaperTicker
+from paper_trading.ticker import PaperTicker  # uses backend's engine
 from paper_trading.models import InstanceStatus
 from routes.paper_trading import router as pt_router
 

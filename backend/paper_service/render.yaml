@@ -2,7 +2,8 @@ services:
   - type: web
     name: quantgene-paper-trading
     env: docker
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: backend/paper_service/Dockerfile
+    dockerContext: .
     envVars:
       - key: TURSO_URL
         sync: false

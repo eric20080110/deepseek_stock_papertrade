@@ -12,6 +12,25 @@ def compute_sharpe(equity_curve: list[float], periods_per_year: int = 365) -> fl
     return float((returns.mean() / returns.std()) * np.sqrt(periods_per_year))
 
 
+def compute_sortino(equity_curve: list[float], periods_per_year: int = 365) -> float:
+    if len(equity_curve) < 2:
+        return 0.0
+    series = pd.Series(equity_curve)
+    returns = series.pct_change().dropna()
+    downside = returns[returns < 0]
+    if len(downside) < 2 or downside.std() == 0:
+        return 0.0
+    return float((returns.mean() / downside.std()) * np.sqrt(periods_per_year))
+
+
+def compute_calmar(equity_curve: list[float], total_bars: int, bars_per_year: int = 365) -> float:
+    dd = compute_max_drawdown(equity_curve)
+    if dd == 0:
+        return 0.0
+    ann_ret = compute_annualized_return(equity_curve, total_bars, bars_per_year)
+    return float(ann_ret / (dd / 100))
+
+
 def compute_max_drawdown(equity_curve: list[float]) -> float:
     if len(equity_curve) < 2:
         return 0.0
@@ -67,6 +86,8 @@ def compute_metrics(
             compute_annualized_return(equity_curve, total_bars, bars_per_year), 6
         ),
         "sharpe_ratio": round(compute_sharpe(equity_curve, bars_per_year), 4),
+        "sortino_ratio": round(compute_sortino(equity_curve, bars_per_year), 4),
+        "calmar_ratio": round(compute_calmar(equity_curve, total_bars, bars_per_year), 6),
         "max_drawdown": round(compute_max_drawdown(equity_curve), 4),
         "win_rate": compute_win_rate(trades),
         "profit_factor": compute_profit_factor(trades),

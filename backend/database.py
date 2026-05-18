@@ -6,14 +6,14 @@ import urllib.error
 
 LOCAL_DB_PATH = os.path.join(os.path.dirname(__file__), "quantgene_local.db")
 
-TURSO_URL = os.environ.get(
-    "TURSO_URL",
-    "https://deepseekstock-eric20080110.aws-ap-northeast-1.turso.io",
-)
-TURSO_TOKEN = os.environ.get(
-    "TURSO_TOKEN",
-    "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3Nzg4MDk1OTQsImlkIjoiMDE5ZTI5MWMtZWIwMS03ODI2LWExNTQtNTlhOThlNmRiMjUxIiwicmlkIjoiZThjZThkNDAtOThlMC00NDZmLWIzYzctN2Y4YjMyNTgxMWZhIn0.SXvmwMJKD1DM0oYgkeKoCEw05MsShT5UkSEue9zBEkvoS51hkwbX5vS05RxR7zJNuKyfxNz9C_9HE2e4cSZUCA",
-)
+TURSO_URL = os.environ.get("TURSO_URL")
+TURSO_TOKEN = os.environ.get("TURSO_TOKEN")
+
+if not TURSO_URL or not TURSO_TOKEN:
+    import warnings
+    warnings.warn(
+        "TURSO_URL and TURSO_TOKEN env vars not set. Turso remote DB unavailable."
+    )
 
 _turso_instance = None
 
@@ -97,6 +97,8 @@ def _interpolate(sql: str, params) -> str:
 
 class _TursoConnection:
     def __init__(self, url, token):
+        if url.startswith("libsql://"):
+            url = url.replace("libsql://", "https://")
         self._url = url
         self._token = token
         self.row_factory = None
@@ -167,6 +169,10 @@ def get_db() -> sqlite3.Connection:
 def get_turso() -> _TursoConnection:
     global _turso_instance
     if _turso_instance is None:
+        if not TURSO_URL or not TURSO_TOKEN:
+            raise RuntimeError(
+                "Turso not configured. Set TURSO_URL and TURSO_TOKEN environment variables."
+            )
         _turso_instance = _TursoConnection(TURSO_URL, TURSO_TOKEN)
     return _turso_instance
 
@@ -336,17 +342,29 @@ CREATE TABLE IF NOT EXISTS evolution_task_results (
 def init_db():
     conn = get_db()
     conn.executescript(_EVOLUTION_SCHEMA)
-    try: conn.execute("ALTER TABLE evolution_tasks ADD COLUMN name TEXT")
-    except: pass
     conn.commit()
-    conn.close()
 
-    t = get_turso()
-    t.executescript(_TURSO_SCHEMA)
+    from migrations import run_migrations
+    turso = None
+    if TURSO_URL and TURSO_TOKEN:
+        try:
+            turso = get_turso()
+            turso.executescript(_TURSO_SCHEMA)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Turso init failed (remote DB will be unavailable): %s", e)
+
+    run_migrations(conn, turso)
+    conn.close()
 
 
 def sync_strategies_to_local():
-    t = get_turso()
+    if not TURSO_URL or not TURSO_TOKEN:
+        return
+    try:
+        t = get_turso()
+    except RuntimeError:
+        return
     rows = t.execute(
         "SELECT * FROM strategy_configs ORDER BY created_at ASC"
     ).fetchall()
@@ -370,6 +388,12 @@ def sync_strategies_to_local():
 
 
 def sync_task_to_turso(task_id: str):
+    if not TURSO_URL or not TURSO_TOKEN:
+        return
+    try:
+        t = get_turso()
+    except RuntimeError:
+        return
     local = get_db()
     row = local.execute(
         "SELECT * FROM evolution_tasks WHERE task_id = ?", (task_id,)
@@ -386,7 +410,6 @@ def sync_task_to_turso(task_id: str):
         (task_id,),
     ).fetchall()
 
-    t = get_turso()
     t.execute(
         """INSERT OR REPLACE INTO evolution_task_results
            (task_id, result_summary_json, champions_json, created_at)

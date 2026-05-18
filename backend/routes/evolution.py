@@ -62,9 +62,10 @@ def _run_task_background(task_id: str):
             on_progress=progress,
         )
         sync_task_to_turso(task_id)
+        _notify_clients(task_id, {"type": "TASK_COMPLETED", "task_id": task_id})
     except Exception as e:
         task_manager.fail_task(task_id, str(e))
-    _notify_clients(task_id, {"type": "TASK_COMPLETED", "task_id": task_id})
+        _notify_clients(task_id, {"type": "TASK_FAILED", "task_id": task_id, "error": str(e)})
 
 
 class CreateTaskRequest(BaseModel):
@@ -156,6 +157,7 @@ def cancel_task(task_id: str, purge: bool = False):
     ok = task_manager.cancel_task(task_id)
     if not ok:
         raise HTTPException(status_code=400, detail="Cannot cancel task")
+    _notify_clients(task_id, {"type": "TASK_CANCELLED", "task_id": task_id})
     return {"detail": "Task cancelled"}
 
 

@@ -21,11 +21,14 @@ class SymbolResult(BaseModel):
     total_return: float
     annualized_return: float
     sharpe_ratio: float
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
     max_drawdown: float
     win_rate: float
     profit_factor: float
     trade_count: int
     equity_curve: list[float]
+    equity_timestamps: list[int] = []
     trades: list[TradeRecord]
     avg_daily_volume: float = 0.0
 
@@ -48,3 +51,5 @@ class BacktestRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     initial_capital: float = 10_000.0
+    stop_loss_pct: float = 0.0
+    take_profit_pct: float = 0.0

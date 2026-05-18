@@ -109,7 +109,8 @@ def get_individual(task_id: str, sid: str):
         raise HTTPException(404, "Individual not found")
     d = dict(row)
     if d["equity_curve_json"]:
-        d["equity_curve"] = json.loads(d["equity_curve_json"])
+        raw = json.loads(d["equity_curve_json"])
+        d["equity_curve"] = raw if isinstance(raw, list) else raw.get("v", [])
     if d["symbol_results_json"]:
         d["symbol_results"] = json.loads(d["symbol_results_json"])
     if d["params_json"]:
@@ -119,6 +120,7 @@ def get_individual(task_id: str, sid: str):
 
 @router.get("/individuals/{sid}/equity-curve")
 def individual_equity_curve(task_id: str, sid: str):
+    from datetime import datetime
     conn = get_db()
     row = conn.execute(
         "SELECT equity_curve_json, symbol_results_json FROM individuals WHERE task_id = ? AND strategy_id = ? ORDER BY generation DESC LIMIT 1",
@@ -128,8 +130,18 @@ def individual_equity_curve(task_id: str, sid: str):
     if not row:
         raise HTTPException(404, "Equity curve not found")
     result = {}
+    ts = []
     if row["equity_curve_json"]:
-        result["equity_curve"] = json.loads(row["equity_curve_json"])
+        raw = json.loads(row["equity_curve_json"])
+        if isinstance(raw, dict):
+            result["equity_curve"] = raw.get("v", [])
+            ts = raw.get("t", [])
+        else:
+            result["equity_curve"] = raw
+    if ts:
+        result["dates"] = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in ts]
+    else:
+        result["dates"] = []
     if row["symbol_results_json"]:
         sym_data = json.loads(row["symbol_results_json"])
         result["symbol_curves"] = {
@@ -152,7 +164,7 @@ def individual_equity_curve(task_id: str, sid: str):
         tf = config.timeframe if config else "1d"
         prices_dates = {sym: _ohlcv_prices(sym, sd, ed, tf) for sym in symbols}
         result["symbol_prices"] = {sym: pd[0] for sym, pd in prices_dates.items()}
-        result["dates"] = next((pd[1] for pd in prices_dates.values() if pd[1]), [])
+        result["dates"] = result["dates"] or next((pd[1] for pd in prices_dates.values() if pd[1]), [])
         dca_by_sym = {}
         for sym in symbols:
             curve = _dca_curve(sym, sd, ed, tf)

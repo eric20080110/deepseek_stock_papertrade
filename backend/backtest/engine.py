@@ -13,25 +13,62 @@ from strategies.registry import STRATEGY_REGISTRY
 from strategies.base import get_strategy_module
 
 
+def _check_sl_tp_breach(
+    high_seg: np.ndarray,
+    low_seg: np.ndarray,
+    position: int,
+    entry_price: float,
+    stop_loss_pct: float,
+    take_profit_pct: float,
+) -> Optional[int]:
+    """Return index of first bar in segment where SL or TP is breached, or None."""
+    if position == 1:
+        sl_lvl = entry_price * (1.0 - stop_loss_pct)
+        tp_lvl = entry_price * (1.0 + take_profit_pct)
+        for j in range(len(low_seg)):
+            if stop_loss_pct > 0 and low_seg[j] <= sl_lvl:
+                return j
+            if take_profit_pct > 0 and high_seg[j] >= tp_lvl:
+                return j
+    else:
+        sl_lvl = entry_price * (1.0 + stop_loss_pct)
+        tp_lvl = entry_price * (1.0 - take_profit_pct)
+        for j in range(len(high_seg)):
+            if stop_loss_pct > 0 and high_seg[j] >= sl_lvl:
+                return j
+            if take_profit_pct > 0 and low_seg[j] <= tp_lvl:
+                return j
+    return None
+
+
 def run_symbol_backtest(
     symbol: str,
     data: pd.DataFrame,
     params: dict,
     strategy_id: str,
     initial_capital: float,
+    stop_loss_pct: float = 0.0,
+    take_profit_pct: float = 0.0,
 ) -> Optional[SymbolResult]:
     if len(data) < SETTINGS.min_bars:
         return None
 
     close = data["close"].values
+    high = data["high"].values
+    low = data["low"].values
     volume = data["volume"].values
-    timestamps = data.index.values
     n = len(data)
 
     if n > 1:
-        avg_bar_sec = (timestamps[-1] - timestamps[0]) / (n - 1)
+        idx_vals = data.index.values
+        if hasattr(idx_vals, "dtype") and "datetime64" in str(idx_vals.dtype):
+            timestamps = idx_vals.astype(np.int64) // 10**9
+        else:
+            timestamps = idx_vals.astype(np.float64)
+        avg_bar_sec = float(timestamps[-1] - timestamps[0]) / (n - 1)
         bars_per_year = int(365.25 * 86400 / avg_bar_sec) if avg_bar_sec > 0 else 365
     else:
+        timestamps = np.zeros(1, dtype=np.float64)
         bars_per_year = 365
 
     strategy_module = get_strategy_module(strategy_id)
@@ -68,11 +105,64 @@ def run_symbol_backtest(
     for i in process:
         # Fill equity for the segment where position/holdings/cash are constant
         if i > prev:
-            if holdings:
-                seg = cash + holdings * close[prev:i]
-                equity_bars.extend(float(v) for v in seg)
-            else:
+            if not holdings:
                 equity_bars.extend([cash] * (i - prev))
+            else:
+                breached = False
+                if stop_loss_pct > 0 or take_profit_pct > 0:
+                    bi = _check_sl_tp_breach(
+                        high[prev:i], low[prev:i],
+                        position, entry_price_v,
+                        stop_loss_pct, take_profit_pct,
+                    )
+                    if bi is not None:
+                        breached = True
+                        # fill equity before breach (still in position)
+                        if bi > 0:
+                            seg = cash + holdings * close[prev:prev + bi]
+                            equity_bars.extend(float(v) for v in seg)
+                        # close at breach bar
+                        exit_px = float(close[prev + bi])
+                        eslip = float(slip_arr[prev + bi])
+                        exit_px_adj = exit_px * (1.0 - eslip) if position == 1 else exit_px * (1.0 + eslip)
+
+                        if position == 1:
+                            trade_pnl = holdings * (exit_px_adj - entry_price_v)
+                            cash += holdings * exit_px_adj
+                        else:
+                            trade_pnl = -holdings * (entry_price_v - exit_px_adj)
+                            cash -= -holdings * exit_px_adj
+                        fee = abs(holdings * exit_px_adj) * taker_fee
+                        cash -= fee
+                        net_pnl = trade_pnl - fee
+
+                        trades.append(TradeRecord(
+                            symbol=symbol,
+                            entry_time=int(current_trade["entry_time"]),
+                            exit_time=int(timestamps[prev + bi]),
+                            entry_bar=current_trade["entry_bar"],
+                            exit_bar=prev + bi,
+                            entry_price=current_trade["entry_price"],
+                            exit_price=exit_px_adj,
+                            quantity=current_trade["quantity"],
+                            pnl=round(net_pnl, 2),
+                            pnl_pct=round(
+                                net_pnl / (current_trade["quantity"] * current_trade["entry_price"]) * 100, 4
+                            ),
+                            direction=position,
+                        ))
+                        current_trade = None
+                        position = 0
+                        holdings = 0.0
+
+                        # fill equity after breach (flat) until next process point
+                        remaining = (i - prev) - bi - 1
+                        if remaining > 0:
+                            equity_bars.extend([cash] * remaining)
+
+                if not breached:
+                    seg = cash + holdings * close[prev:i]
+                    equity_bars.extend(float(v) for v in seg)
 
         if i >= n:
             break
@@ -161,6 +251,7 @@ def run_symbol_backtest(
         ))
 
     equity_curve = [float(initial_capital)] + equity_bars
+    equity_timestamps = [int(t) for t in timestamps.tolist()]
 
     metrics_dict = compute_metrics(equity_curve, trades, n, bars_per_year)
     avg_dv = float(np.mean(volume)) if n > 0 else 0.0
@@ -170,24 +261,31 @@ def run_symbol_backtest(
         total_return=metrics_dict["total_return"],
         annualized_return=metrics_dict["annualized_return"],
         sharpe_ratio=metrics_dict["sharpe_ratio"],
+        sortino_ratio=metrics_dict["sortino_ratio"],
+        calmar_ratio=metrics_dict["calmar_ratio"],
         max_drawdown=metrics_dict["max_drawdown"],
         win_rate=metrics_dict["win_rate"],
         profit_factor=metrics_dict["profit_factor"],
         trade_count=metrics_dict["trade_count"],
         equity_curve=equity_curve,
+        equity_timestamps=equity_timestamps,
         trades=trades,
         avg_daily_volume=float(avg_dv),
     )
 
 
 def _run_symbol_wrapper(args: tuple) -> Optional[SymbolResult]:
-    symbol, data, params, strategy_id, initial_capital = args
+    if len(args) >= 7:
+        symbol, data, params, strategy_id, initial_capital, stop_loss_pct, take_profit_pct = args
+    else:
+        symbol, data, params, strategy_id, initial_capital = args
+        stop_loss_pct = take_profit_pct = 0.0
     df = DATA_CACHE.ensure(symbol)
     if df is None:
         df = data
     if df is None or df.empty:
         return None
-    return run_symbol_backtest(symbol, df, params, strategy_id, initial_capital)
+    return run_symbol_backtest(symbol, df, params, strategy_id, initial_capital, stop_loss_pct, take_profit_pct)
 
 
 def run_backtest(
@@ -197,6 +295,8 @@ def run_backtest(
     data_map: dict[str, pd.DataFrame],
     initial_capital: float = 10_000.0,
     parallel: bool = True,
+    stop_loss_pct: float = 0.0,
+    take_profit_pct: float = 0.0,
 ) -> InstanceResult:
     start = time.time()
 
@@ -207,7 +307,7 @@ def run_backtest(
 
     if parallel and len(symbols) > 1:
         args_list = [
-            (sym, data_map.get(sym), params, strategy_id, initial_capital)
+            (sym, data_map.get(sym), params, strategy_id, initial_capital, stop_loss_pct, take_profit_pct)
             for sym in symbols
         ]
         with Pool() as pool:
@@ -218,7 +318,7 @@ def run_backtest(
             df = data_map.get(sym)
             if df is not None:
                 results.append(
-                    run_symbol_backtest(sym, df, params, strategy_id, initial_capital)
+                    run_symbol_backtest(sym, df, params, strategy_id, initial_capital, stop_loss_pct, take_profit_pct)
                 )
 
     symbol_results: dict[str, SymbolResult] = {}

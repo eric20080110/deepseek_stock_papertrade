@@ -31,12 +31,29 @@ def _generate_synthetic_data(
 ) -> pd.DataFrame:
     np.random.seed(hash(symbol) % (2**31))
     dates = pd.date_range(end="2025-12-31", periods=n_bars, freq="D")
-    returns = np.random.normal(0.0005, 0.02, n_bars)
+
+    # GARCH(1,1)-like volatility with fat-tailed t-distribution
+    omega = 0.000001
+    alpha = 0.12
+    beta = 0.84
+    sigma2 = 0.0004
+    returns = np.zeros(n_bars)
+    for i in range(n_bars):
+        sigma2 = omega + alpha * (returns[i - 1] ** 2 if i > 0 else 0) + beta * sigma2
+        returns[i] = np.random.standard_t(4) * np.sqrt(sigma2)
+    returns += 0.0005
+
     price = start_price * np.exp(np.cumsum(returns))
-    noise = np.random.uniform(-0.005, 0.005, n_bars)
-    high = price * (1 + abs(noise) + 0.01 + np.random.uniform(0, 0.005, n_bars))
-    low = price * (1 - abs(noise) - 0.01 - np.random.uniform(0, 0.005, n_bars))
-    volume = np.random.uniform(100, 10000, n_bars)
+    vol_scale = np.sqrt(sigma2) / np.sqrt(0.0004) if sigma2 > 0 else 1.0
+    base_vol = 0.01 * vol_scale
+    noise = np.random.uniform(-base_vol, base_vol, n_bars)
+    high = price * (1 + abs(noise) + base_vol + np.random.uniform(0, base_vol, n_bars))
+    low = price * (1 - abs(noise) - base_vol - np.random.uniform(0, base_vol, n_bars))
+    volume = np.random.lognormal(
+        mean=np.log(abs(returns) * 1e5 + 100),
+        sigma=0.5,
+        size=n_bars,
+    )
 
     return pd.DataFrame(
         {
@@ -73,6 +90,8 @@ def run_backtest_endpoint(req: BacktestRequest):
             symbols=req.symbols,
             data_map=data_map,
             initial_capital=req.initial_capital,
+            stop_loss_pct=req.stop_loss_pct,
+            take_profit_pct=req.take_profit_pct,
         )
         return result
     except Exception as e:

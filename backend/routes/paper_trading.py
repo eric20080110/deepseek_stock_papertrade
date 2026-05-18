@@ -121,6 +121,9 @@ def get_chart(instance_id: str):
         }
         for t in raw_trades
     ]
+    equity_history = engine.get_equity_history(instance_id)
+    result["equity_curve"] = [p["equity"] for p in equity_history]
+    result["equity_dates"] = [p["time"] for p in equity_history]
     return result
 
 

@@ -1,5 +1,6 @@
 import json
 import time
+import pandas as pd
 from typing import Optional
 
 from param_space.space import ParameterSpace
@@ -43,6 +44,41 @@ def _parse_param_defs(parameters: list[dict], constraints: list[dict]) -> Parame
         elif ct == "categorical_group":
             parsed_constraints.append(CategoricalGroupConstraint(**c))
     return ParameterSpace(parsed_params, parsed_constraints)
+
+
+def _create_walk_forward_windows(
+    data_map: dict[str, pd.DataFrame],
+    n_windows: int,
+    train_pct: float = 0.7,
+) -> list[tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]]:
+    """Split data into N walk-forward windows. Each window: IS = train_pct, OOS = 1-train_pct.
+    Windows are anchored at the end of the data and slide backward.
+    Returns list of (is_map, oos_map) tuples."""
+    min_len = min(len(df) for df in data_map.values())
+    if min_len < 100 or n_windows <= 1:
+        oos_cut = int(min_len * max(train_pct, 0.5))
+        is_map = {sym: df.iloc[:oos_cut] for sym, df in data_map.items()}
+        oos_map = {sym: df.iloc[oos_cut:] for sym, df in data_map.items()}
+        if any(len(df) < 2 for df in oos_map.values()):
+            oos_map = {}
+        return [(is_map, oos_map)]
+
+    oos_frac = 1.0 - train_pct
+    each_oos = max(50, int(min_len * oos_frac / n_windows))
+    each_is = int(each_oos * train_pct / oos_frac)
+    step = each_oos
+
+    windows = []
+    for w in range(n_windows):
+        end = min_len - (n_windows - w - 1) * step
+        start = max(0, end - each_is - each_oos)
+        mid = start + each_is
+        is_map = {sym: df.iloc[start:mid] for sym, df in data_map.items()}
+        oos_map = {sym: df.iloc[mid:end] for sym, df in data_map.items()}
+        if any(len(df) < 2 for df in oos_map.values()):
+            oos_map = {}
+        windows.append((is_map, oos_map))
+    return windows
 
 
 class EvolutionEngine:
@@ -121,14 +157,14 @@ class EvolutionEngine:
                 end_date=cfg.end_date,
             )
             if df is not None:
-                DATA_CACHE.store(sym, df)
+                DATA_CACHE.store(sym, df, timeframe=timeframe)
                 data_map[sym] = df
 
         if not data_map:
             self.task_manager.fail_task(task_id, "No data available for any symbol")
             return
 
-        oos_cut = int(len(list(data_map.values())[0]) * 0.7) if data_map else 350
+        walk_windows = _create_walk_forward_windows(data_map, cfg.walk_forward_windows)
 
         strategy_id = template_id
 
@@ -158,7 +194,9 @@ class EvolutionEngine:
                 individuals=pop,
                 strategy_id=strategy_id,
                 symbols=symbols,
-                data_map=data_map,
+                data_map=walk_windows[0][0],
+                oos_data_map=walk_windows[0][1],
+                walk_data_maps=walk_windows if len(walk_windows) > 1 else None,
                 on_progress=lambda i, t: on_progress(gen + 1, i, t) if on_progress else None,
             )
 
@@ -179,15 +217,23 @@ class EvolutionEngine:
                     "win_rate": wm.get("win_rate", 0),
                     "trade_count": wm.get("trade_count", 0),
                     "equity_curve": wm.get("equity_curve", []),
+                    "equity_timestamps": wm.get("equity_timestamps", []),
                 })
-                sr = r.get("symbol_results", {})
-                first_sym = next(iter(sr.values())) if sr else {}
-                oos_metrics.append({
-                    "strategy_id": r["strategy_id"],
-                    "annualized_return": first_sym.get("annualized_return", 0) * 0.7,
-                    "sharpe_ratio": first_sym.get("sharpe_ratio", 0) * 0.7,
-                    "max_drawdown": first_sym.get("max_drawdown", 0) * 1.2,
-                })
+                oos_wm = r.get("oos_metrics")
+                if oos_wm:
+                    oos_metrics.append({
+                        "strategy_id": r["strategy_id"],
+                        "annualized_return": oos_wm.get("annualized_return", 0),
+                        "sharpe_ratio": oos_wm.get("sharpe_ratio", 0),
+                        "max_drawdown": oos_wm.get("max_drawdown", 0),
+                    })
+                else:
+                    oos_metrics.append({
+                        "strategy_id": r["strategy_id"],
+                        "annualized_return": 0,
+                        "sharpe_ratio": 0,
+                        "max_drawdown": 0,
+                    })
 
             scores, summary = score_individuals(is_metrics, oos_metrics)
 
@@ -221,6 +267,7 @@ class EvolutionEngine:
                     "passed_dynamic": s.passed_dynamic_threshold,
                     "elimination_reason": s.elimination_reason,
                     "equity_curve": wm.get("equity_curve", []),
+                    "equity_timestamps": wm.get("equity_timestamps", []),
                     "symbol_results": res_item.get("symbol_results", {}),
                 })
             self.task_manager.save_individuals(task_id, gen + 1, ind_records)
@@ -297,6 +344,10 @@ class EvolutionEngine:
             offspring = operators.produce_offspring(parent_pool, parent_params, remaining)
             pop = elite_params + offspring
             operators.reset_stats()
+
+        task = self.task_manager.get_task(task_id)
+        if task and task.status == "CANCELLED":
+            return
 
         final_summary = {
             "total_generations": min(gen + 1, max_gen),

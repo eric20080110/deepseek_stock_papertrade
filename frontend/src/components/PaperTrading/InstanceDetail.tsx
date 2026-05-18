@@ -45,19 +45,25 @@ export function InstanceDetail({ instanceId }: Props) {
   useEffect(() => {
     if (!chartRef.current || !instance) return
     const Plotly = (window as any).Plotly
-    if (!Plotly || !instance.total_equity) return
-    const initial = instance.initial_capital * (typeof instance.symbols === 'string'
-      ? JSON.parse(instance.symbols).length : instance.symbols.length)
-    const curve = [initial, instance.total_equity]
+    if (!Plotly) return
+    const curve = (chartData?.equity_curve?.length ?? 0) > 0
+      ? chartData.equity_curve
+      : [instance.initial_capital, (instance.total_equity || instance.initial_capital)]
+    const ts = (chartData?.equity_dates?.length ?? 0) > 0 ? chartData.equity_dates : []
+    const fmtDate = (d: Date) =>
+      `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+    const xDates = ts.length > 0
+      ? ts.map((t: number) => fmtDate(new Date(t * 1000)))
+      : [fmtDate(new Date((instance.started_at || Date.now() / 1000) * 1000)), fmtDate(new Date())]
     Plotly.newPlot(chartRef.current, [{
-      x: [0, 1], y: curve, type: 'scatter', mode: 'lines',
+      x: xDates, y: curve, type: 'scatter', mode: 'lines',
       line: { color: '#2563eb' }, name: '總資產',
     }], {
       margin: { t: 10, r: 20, b: 40, l: 60 }, height: 200,
       xaxis: { title: '時間' }, yaxis: { title: 'USDT' },
       paper_bgcolor: 'white', plot_bgcolor: 'white',
     }, { responsive: true, displayModeBar: false })
-  }, [instance])
+  }, [instance, chartData])
 
   // per-symbol price charts
   useEffect(() => {
@@ -159,12 +165,13 @@ export function InstanceDetail({ instanceId }: Props) {
       </div>
       <div className="text-sm text-gray-400 mb-4">狀態：{instance.status}</div>
 
-      <div className="grid grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-5 gap-3 mb-4">
         {[
           ['總資產', `${instance.total_equity?.toFixed(2)} USDT`],
           ['總報酬', `${instance.total_return >= 0 ? '+' : ''}${instance.total_return?.toFixed(2)}%`],
           ['已實現損益', `${instance.realized_pnl?.toFixed(2)} USDT`],
           ['交易次數', instance.trade_count],
+          ['精度', instance.timeframe || '-'],
         ].map(([k, v]) => (
           <div key={k} className="p-3 border rounded-lg bg-white">
             <div className="text-xs text-gray-400">{k}</div>

@@ -161,6 +161,7 @@ class PaperTradingEngine:
             "data_map": data_map,
             "bar_idx": 0,
             "max_bars": max_bars,
+            "equity_history": [],
         }
 
     def tick(self, instance_id: str) -> Optional[dict]:
@@ -214,6 +215,9 @@ class PaperTradingEngine:
         ctx["bar_idx"] = idx + 1
         total_equity = self._compute_total_equity(instance_id)
         self._update_instance_metrics(instance_id, total_equity)
+        first_sym = symbols[0] if symbols else None
+        ts = int(data_map[first_sym].index[idx]) if first_sym and first_sym in data_map and idx < len(data_map[first_sym]) else int(time.time())
+        ctx.setdefault("equity_history", []).append({"time": ts, "equity": total_equity})
         return {"instance_id": instance_id, "total_equity": total_equity, "events": events}
 
     def _get_position(self, instance_id: str, symbol: str) -> Optional[dict]:
@@ -303,9 +307,7 @@ class PaperTradingEngine:
         inst = self.get_instance(instance_id)
         if not inst:
             return 0.0
-        capital = inst.initial_capital * len(
-            json.loads(inst.symbols) if isinstance(inst.symbols, str) else inst.symbols
-        )
+        capital = inst.initial_capital
         conn = get_db()
         positions = conn.execute(
             "SELECT * FROM virtual_positions WHERE instance_id = ?", (instance_id,)
@@ -323,10 +325,13 @@ class PaperTradingEngine:
         inst = self.get_instance(instance_id)
         if not inst:
             return
-        capital = inst.initial_capital * len(
-            json.loads(inst.symbols) if isinstance(inst.symbols, str) else inst.symbols
-        )
+        capital = inst.initial_capital
         total_return = ((total_equity - capital) / capital) * 100 if capital > 0 else 0
+
+        peak = max(inst.total_equity, capital)
+        drawdown = ((peak - total_equity) / peak * 100) if peak > 0 else 0
+        max_dd = max(inst.max_drawdown, drawdown)
+
         conn = get_db()
         pos_rows = conn.execute(
             "SELECT * FROM virtual_positions WHERE instance_id = ?", (instance_id,)
@@ -354,6 +359,7 @@ class PaperTradingEngine:
             realized_pnl=round(realized, 2),
             trade_count=trade_count,
             win_rate=round(win_rate, 2),
+            max_drawdown=round(max_dd, 4),
         )
 
     def get_positions(self, instance_id: str) -> list[dict]:
@@ -363,6 +369,10 @@ class PaperTradingEngine:
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
+
+    def get_equity_history(self, instance_id: str) -> list[dict]:
+        ctx = self._running_instances.get(instance_id)
+        return ctx.get("equity_history", []) if ctx else []
 
     def get_trades(self, instance_id: str, limit: int = 100) -> list[dict]:
         conn = get_db()
