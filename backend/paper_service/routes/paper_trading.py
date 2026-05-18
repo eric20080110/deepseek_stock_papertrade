@@ -121,12 +121,17 @@ def set_auto_tick(instance_id: str, enabled: bool = True, interval_sec: int = 10
 
 @router.post("/{instance_id}/tick")
 def tick_instance(instance_id: str):
-    result = engine.tick(instance_id)
-    if result is None:
-        inst = engine.get_instance(instance_id)
-        if not inst: raise HTTPException(404, "Instance not found")
-        return {"status": inst.status.value, "message": "Not running"}
-    return result
+    try:
+        result = engine.tick(instance_id)
+        if result is None:
+            inst = engine.get_instance(instance_id)
+            if not inst: raise HTTPException(404, "Instance not found")
+            return {"status": inst.status.value, "message": "Not running"}
+        return result
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("tick_instance %s error: %s", instance_id, e)
+        raise HTTPException(500, f"Tick failed: {e}")
 
 
 @router.post("/webhook/binance")

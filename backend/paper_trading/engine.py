@@ -168,6 +168,13 @@ class PaperTradingEngine:
         inst = self.get_instance(instance_id)
         if not inst or inst.status != InstanceStatus.RUNNING:
             return None
+        if instance_id not in self._running_instances:
+            try:
+                self._ensure_context(instance_id)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("tick _ensure_context error for %s: %s", instance_id, e)
+                return None
         ctx = self._running_instances.get(instance_id)
         if not ctx:
             return None
