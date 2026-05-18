@@ -67,7 +67,13 @@ def tick_all():
                 import logging
                 logging.getLogger(__name__).warning("tick %s error: %s", inst.instance_id, e)
                 errors.append({"instance_id": inst.instance_id, "error": str(e)})
-    return {"ticked": count, "total_instances": len(instances), "errors": errors}
+    return {
+        "ticked": count,
+        "total_instances": len(instances),
+        "errors": errors,
+        "version": "v1d333b7",
+        "running_keys": list(engine._running_instances.keys()) if hasattr(engine, '_running_instances') else [],
+    }
 
 
 @app.post("/tick-debug")
