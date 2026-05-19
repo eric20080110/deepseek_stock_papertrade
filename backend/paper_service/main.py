@@ -76,6 +76,22 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 app.include_router(pt_router)
 
 
+@app.get("/ping")
+@app.post("/ping")
+def ping():
+    """Lightweight keep-alive endpoint — responds immediately, no DB calls.
+    Use this for cron-job.org to avoid cold-start timeouts."""
+    import time as _time
+    from datetime import datetime, timezone
+    uptime = int(_time.time() - _startup_time) if _startup_time else 0
+    return {
+        "ok": True,
+        "uptime_sec": uptime,
+        "cold_start": uptime < 90,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
 @app.get("/health")
 def health():
     import os, sys
