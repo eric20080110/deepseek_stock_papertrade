@@ -217,11 +217,27 @@ class PaperTradingEngine:
         params = json.loads(inst.params_json) if isinstance(inst.params_json, str) else inst.params_json
         template_id = self._resolve_template_id(inst)
 
+        # Load positions and realized PnL into memory to avoid Turso reads on every tick
+        conn = get_db()
+        pos_rows = conn.execute(
+            "SELECT * FROM virtual_positions WHERE instance_id = ?", (instance_id,)
+        ).fetchall()
+        realized_row = conn.execute(
+            "SELECT SUM(realized_pnl) as rp FROM virtual_trades WHERE instance_id = ? AND realized_pnl IS NOT NULL",
+            (instance_id,),
+        ).fetchone()
+        conn.close()
+
+        positions = {r["symbol"]: dict(r) for r in pos_rows}
+        realized_pnl = float(realized_row["rp"] or 0) if realized_row else 0.0
+
         self._running_instances[instance_id] = {
             "template_id": template_id,
             "params": params,
             "symbols": symbols,
             "timeframe": inst.timeframe or "1d",
+            "positions": positions,
+            "realized_pnl": realized_pnl,
         }
 
     _BAR_SEC = {"1d": 86400, "1h": 3600, "30m": 1800, "15m": 900, "5m": 300, "1m": 60}
@@ -347,11 +363,13 @@ class PaperTradingEngine:
                     self._close_position(instance_id, sym, latest_price, reason="take_profit")
                     events.append({"type": "close", "symbol": sym, "price": latest_price, "reason": "take_profit"})
 
-        # Skip expensive DB writes if no symbols had data (Binance unreachable)
+        # Skip DB writes if no symbols had usable data (Binance unreachable)
         if processed_syms == 0:
             return {"instance_id": instance_id, "total_equity": current_equity, "events": []}
         total_equity = self._compute_total_equity(instance_id)
-        self._update_instance_metrics(instance_id, total_equity)
+        # Only update metrics/equity in DB when there were actual trades or periodically
+        if events:
+            self._update_instance_metrics(instance_id, total_equity)
         ts = int(time.time())
         self._save_equity_point(instance_id, ts, total_equity)
         result = {"instance_id": instance_id, "total_equity": total_equity, "events": events}
@@ -363,6 +381,10 @@ class PaperTradingEngine:
         return result
 
     def _get_position(self, instance_id: str, symbol: str) -> Optional[dict]:
+        ctx = self._running_instances.get(instance_id)
+        if ctx and "positions" in ctx:
+            return ctx["positions"].get(symbol)
+        # Fallback: read from DB (only when context not yet loaded)
         conn = get_db()
         row = conn.execute(
             "SELECT * FROM virtual_positions WHERE instance_id = ? AND symbol = ?",
@@ -372,25 +394,34 @@ class PaperTradingEngine:
         return dict(row) if row else None
 
     def _open_position(self, instance_id: str, symbol: str, direction: int, price: float, capital: float):
-        conn = get_db()
-        # Bug 3 fix: charge 0.1% opening fee; qty net of fee
         qty = (capital * 0.999) / price
         fee = qty * price * 0.001
+        side = "long" if direction == 1 else "short"
         now = int(time.time())
-        conn.execute(
-            """UPDATE virtual_positions SET side=?, entry_price=?, entry_time=?,
-               quantity=?, current_price=?, unrealized_pnl=0, unrealized_pnl_pct=0
-               WHERE instance_id=? AND symbol=?""",
-            ("long" if direction == 1 else "short", price, now, qty, price, instance_id, symbol),
-        )
-        conn.execute(
-            """INSERT INTO virtual_trades (trade_id, instance_id, symbol, side, price, quantity, fee, signal_time, executed_time)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(uuid.uuid4()), instance_id, symbol, "buy" if direction == 1 else "sell",
-             price, qty, round(fee, 6), now, now),
-        )
-        conn.commit()
+        conn = get_db()
+        conn.execute_batch([
+            (
+                """UPDATE virtual_positions SET side=?, entry_price=?, entry_time=?,
+                   quantity=?, current_price=?, unrealized_pnl=0, unrealized_pnl_pct=0
+                   WHERE instance_id=? AND symbol=?""",
+                (side, price, now, qty, price, instance_id, symbol),
+            ),
+            (
+                """INSERT INTO virtual_trades (trade_id, instance_id, symbol, side, price, quantity, fee, signal_time, executed_time)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), instance_id, symbol, "buy" if direction == 1 else "sell",
+                 price, qty, round(fee, 6), now, now),
+            ),
+        ])
         conn.close()
+        # Update in-memory cache
+        ctx = self._running_instances.get(instance_id)
+        if ctx is not None:
+            ctx.setdefault("positions", {})[symbol] = {
+                "instance_id": instance_id, "symbol": symbol, "side": side,
+                "entry_price": price, "entry_time": now, "quantity": qty,
+                "current_price": price, "unrealized_pnl": 0.0, "unrealized_pnl_pct": 0.0,
+            }
 
     def _close_position(self, instance_id: str, symbol: str, price: float, reason: str = "signal"):
         pos = self._get_position(instance_id, symbol)
@@ -403,33 +434,64 @@ class PaperTradingEngine:
         pnl -= close_fee
         now = int(time.time())
         conn = get_db()
-        conn.execute(
-            """UPDATE virtual_positions SET side='flat', entry_price=0, entry_time=0,
-               quantity=0, current_price=0, unrealized_pnl=0, unrealized_pnl_pct=0
-               WHERE instance_id=? AND symbol=?""",
-            (instance_id, symbol),
-        )
-        conn.execute(
-            """INSERT INTO virtual_trades (trade_id, instance_id, symbol, side, price, quantity, fee, realized_pnl, signal_time, executed_time, trigger_reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(uuid.uuid4()), instance_id, symbol,
-             "sell" if pos["side"] == "long" else "buy",
-             price, qty, round(close_fee, 6), round(pnl, 2), now, now, reason),
-        )
-        conn.commit()
+        conn.execute_batch([
+            (
+                """UPDATE virtual_positions SET side='flat', entry_price=0, entry_time=0,
+                   quantity=0, current_price=0, unrealized_pnl=0, unrealized_pnl_pct=0
+                   WHERE instance_id=? AND symbol=?""",
+                (instance_id, symbol),
+            ),
+            (
+                """INSERT INTO virtual_trades (trade_id, instance_id, symbol, side, price, quantity, fee, realized_pnl, signal_time, executed_time, trigger_reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), instance_id, symbol,
+                 "sell" if pos["side"] == "long" else "buy",
+                 price, qty, round(close_fee, 6), round(pnl, 2), now, now, reason),
+            ),
+        ])
         conn.close()
+        # Update in-memory cache
+        ctx = self._running_instances.get(instance_id)
+        if ctx is not None:
+            ctx.setdefault("positions", {})[symbol] = {
+                "instance_id": instance_id, "symbol": symbol, "side": "flat",
+                "entry_price": 0.0, "entry_time": 0, "quantity": 0.0,
+                "current_price": 0.0, "unrealized_pnl": 0.0, "unrealized_pnl_pct": 0.0,
+            }
+            ctx["realized_pnl"] = ctx.get("realized_pnl", 0.0) + pnl
 
     def _close_all_positions(self, instance_id: str, price: Optional[float]):
-        conn = get_db()
-        positions = conn.execute(
-            "SELECT * FROM virtual_positions WHERE instance_id = ? AND side != 'flat'",
-            (instance_id,),
-        ).fetchall()
-        conn.close()
-        for p in positions:
-            self._close_position(instance_id, p["symbol"], price or p["current_price"] or 50000)
+        ctx = self._running_instances.get(instance_id)
+        if ctx and "positions" in ctx:
+            symbols = [sym for sym, p in ctx["positions"].items() if p.get("side") != "flat"]
+        else:
+            conn = get_db()
+            rows = conn.execute(
+                "SELECT symbol, current_price FROM virtual_positions WHERE instance_id = ? AND side != 'flat'",
+                (instance_id,),
+            ).fetchall()
+            conn.close()
+            symbols = [r["symbol"] for r in rows]
+            if not price:
+                price_map = {r["symbol"]: r["current_price"] for r in rows}
+        for sym in symbols:
+            fallback = price or (price_map.get(sym, 50000) if "price_map" in dir() else 50000)
+            self._close_position(instance_id, sym, fallback)
 
     def _update_position_price(self, instance_id: str, symbol: str, price: float):
+        ctx = self._running_instances.get(instance_id)
+        if ctx and "positions" in ctx:
+            pos = ctx["positions"].get(symbol)
+            if pos and pos.get("side") != "flat":
+                entry = pos["entry_price"]
+                qty = pos["quantity"]
+                pnl = qty * (price - entry) if pos["side"] == "long" else qty * (entry - price)
+                pnl_pct = ((price - entry) / entry) * 100 if pos["side"] == "long" else ((entry - price) / entry) * 100
+                pos["current_price"] = price
+                pos["unrealized_pnl"] = round(pnl, 2)
+                pos["unrealized_pnl_pct"] = round(pnl_pct, 2)
+            return
+        # Fallback: write to DB (only when context not yet loaded)
         conn = get_db()
         row = conn.execute(
             "SELECT * FROM virtual_positions WHERE instance_id = ? AND symbol = ?",
@@ -453,6 +515,12 @@ class PaperTradingEngine:
         if not inst:
             return 0.0
         capital = inst.initial_capital
+        ctx = self._running_instances.get(instance_id)
+        if ctx and "positions" in ctx:
+            unrealized = sum(p.get("unrealized_pnl") or 0 for p in ctx["positions"].values())
+            realized = ctx.get("realized_pnl", 0.0)
+            return capital + realized + unrealized
+        # Fallback: read from DB
         conn = get_db()
         positions = conn.execute(
             "SELECT * FROM virtual_positions WHERE instance_id = ?", (instance_id,)
@@ -473,7 +541,6 @@ class PaperTradingEngine:
         capital = inst.initial_capital
         total_return = ((total_equity - capital) / capital) * 100 if capital > 0 else 0
 
-        # Bug 1 fix: track running equity peak in context so drawdown reflects true historical peak
         ctx = self._running_instances.get(instance_id, {})
         stored_peak = ctx.get("_equity_peak", capital)
         peak = max(stored_peak, total_equity, capital)
@@ -482,25 +549,39 @@ class PaperTradingEngine:
         drawdown = ((peak - total_equity) / peak * 100) if peak > 0 else 0
         max_dd = max(inst.max_drawdown, drawdown)
 
-        conn = get_db()
-        pos_rows = conn.execute(
-            "SELECT * FROM virtual_positions WHERE instance_id = ?", (instance_id,)
-        ).fetchall()
-        upnl = sum(p["unrealized_pnl"] or 0 for p in pos_rows)
-        trade_rows = conn.execute(
-            "SELECT COUNT(*) as cnt, SUM(realized_pnl) as rp FROM virtual_trades WHERE instance_id = ? AND realized_pnl IS NOT NULL",
-            (instance_id,),
-        ).fetchone()
-        trade_count = trade_rows["cnt"] or 0
-        realized = trade_rows["rp"] or 0
-        win_rows = conn.execute(
-            "SELECT COUNT(*) as cnt FROM virtual_trades WHERE instance_id = ? AND realized_pnl > 0",
-            (instance_id,),
-        ).fetchone()
-        win_count = win_rows["cnt"] or 0
-        win_rate = (win_count / trade_count * 100) if trade_count > 0 else 0
-        conn.close()
+        # Use in-memory position/trade data when available (avoids 4 Turso reads)
+        if ctx and "positions" in ctx:
+            upnl = sum(p.get("unrealized_pnl") or 0 for p in ctx["positions"].values())
+            realized = ctx.get("realized_pnl", 0.0)
+            # Batch both COUNT queries into a single HTTP request
+            conn = get_db()
+            results = conn.fetch_batch([
+                ("SELECT COUNT(*) as cnt FROM virtual_trades WHERE instance_id = ? AND realized_pnl IS NOT NULL", (instance_id,)),
+                ("SELECT COUNT(*) as cnt FROM virtual_trades WHERE instance_id = ? AND realized_pnl > 0", (instance_id,)),
+            ])
+            conn.close()
+            trade_count = (results[0].fetchone() or {}).get("cnt") or 0
+            win_count = (results[1].fetchone() or {}).get("cnt") or 0
+        else:
+            conn = get_db()
+            pos_rows = conn.execute(
+                "SELECT unrealized_pnl FROM virtual_positions WHERE instance_id = ?", (instance_id,)
+            ).fetchall()
+            upnl = sum(p["unrealized_pnl"] or 0 for p in pos_rows)
+            trade_rows = conn.execute(
+                "SELECT COUNT(*) as cnt, SUM(realized_pnl) as rp FROM virtual_trades WHERE instance_id = ? AND realized_pnl IS NOT NULL",
+                (instance_id,),
+            ).fetchone()
+            trade_count = trade_rows["cnt"] or 0
+            realized = trade_rows["rp"] or 0
+            win_rows = conn.execute(
+                "SELECT COUNT(*) as cnt FROM virtual_trades WHERE instance_id = ? AND realized_pnl > 0",
+                (instance_id,),
+            ).fetchone()
+            win_count = win_rows["cnt"] or 0
+            conn.close()
 
+        win_rate = (win_count / trade_count * 100) if trade_count > 0 else 0
         self.update_instance(
             instance_id,
             total_equity=round(total_equity, 2),
@@ -511,6 +592,18 @@ class PaperTradingEngine:
             win_rate=round(win_rate, 2),
             max_drawdown=round(max_dd, 4),
         )
+        # Sync in-memory position prices back to DB so frontend sees current prices
+        if ctx and "positions" in ctx:
+            conn = get_db()
+            for sym, p in ctx["positions"].items():
+                if p.get("side") != "flat":
+                    conn.execute(
+                        """UPDATE virtual_positions SET current_price=?, unrealized_pnl=?, unrealized_pnl_pct=?
+                           WHERE instance_id=? AND symbol=?""",
+                        (p["current_price"], p["unrealized_pnl"], p["unrealized_pnl_pct"], instance_id, sym),
+                    )
+            conn.commit()
+            conn.close()
 
     def get_positions(self, instance_id: str) -> list[dict]:
         conn = get_db()

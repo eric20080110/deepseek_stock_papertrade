@@ -155,6 +155,23 @@ class _TursoConnection:
         ]
         self._request(stmts, label="executemany")
 
+    def execute_batch(self, sql_params: list[tuple]):
+        """Send multiple different SQL statements in a single HTTP request."""
+        stmts = [
+            {"type": "execute", "stmt": {"sql": _interpolate(sql, params)}}
+            for sql, params in sql_params
+        ]
+        self._request(stmts, label="execute_batch")
+
+    def fetch_batch(self, sql_params: list[tuple]) -> list:
+        """Send multiple SELECTs in one HTTP request; returns list of _TursoResult."""
+        stmts = [
+            {"type": "execute", "stmt": {"sql": _interpolate(sql, params)}}
+            for sql, params in sql_params
+        ]
+        resp = self._request(stmts, label="fetch_batch")
+        return [_TursoResult(r) for r in resp.get("results", [])]
+
     def executescript(self, sql):
         stmts = [s.strip() for s in sql.split(";") if s.strip()]
         if not stmts:
@@ -186,6 +203,14 @@ class _PooledConn:
 
     def executemany(self, sql, params_list):
         return self._c.executemany(sql, params_list)
+
+    def execute_batch(self, sql_params: list[tuple]):
+        for sql, params in sql_params:
+            self._c.execute(sql, params)
+        self._c.commit()
+
+    def fetch_batch(self, sql_params: list[tuple]) -> list:
+        return [self._c.execute(sql, params) for sql, params in sql_params]
 
     def executescript(self, sql):
         return self._c.executescript(sql)
