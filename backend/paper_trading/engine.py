@@ -1,6 +1,7 @@
 import json
 import time
 import uuid
+import threading
 from typing import Optional
 
 from database import get_turso as _get_turso, get_db as _get_local
@@ -10,10 +11,23 @@ from paper_trading.models import (
 
 
 def get_db():
+    """Return Turso if available, otherwise local SQLite. Timeout is 6s so fallback is fast."""
     try:
         return _get_turso()
     except Exception:
         return _get_local()
+
+
+_instance_cache: dict[str, PaperInstance] = {}
+_instance_cache_ts: float = 0.0
+_instance_cache_lock = threading.Lock()
+_INSTANCE_CACHE_TTL = 5.0
+
+
+def _invalidate_instance_cache():
+    global _instance_cache_ts
+    with _instance_cache_lock:
+        _instance_cache_ts = 0.0
 
 
 class PaperTradingEngine:
@@ -25,6 +39,7 @@ class PaperTradingEngine:
         self._tick_callbacks.append(cb)
 
     def create_instance(self, req: CreateInstanceRequest) -> PaperInstance:
+        _invalidate_instance_cache()
         conn = get_db()
         instance_id = str(uuid.uuid4())
         now = int(time.time())
@@ -48,6 +63,10 @@ class PaperTradingEngine:
         return self.get_instance(instance_id)
 
     def get_instance(self, instance_id: str) -> Optional[PaperInstance]:
+        global _instance_cache, _instance_cache_ts
+        with _instance_cache_lock:
+            if time.time() - _instance_cache_ts < _INSTANCE_CACHE_TTL and instance_id in _instance_cache:
+                return _instance_cache[instance_id]
         conn = get_db()
         row = conn.execute(
             "SELECT * FROM paper_instances WHERE instance_id = ?", (instance_id,)
@@ -55,17 +74,29 @@ class PaperTradingEngine:
         conn.close()
         if not row:
             return None
-        return self._row_to_instance(row)
+        inst = self._row_to_instance(row)
+        with _instance_cache_lock:
+            _instance_cache[instance_id] = inst
+        return inst
 
     def list_instances(self) -> list[PaperInstance]:
+        global _instance_cache, _instance_cache_ts
+        with _instance_cache_lock:
+            if time.time() - _instance_cache_ts < _INSTANCE_CACHE_TTL and _instance_cache:
+                return sorted(_instance_cache.values(), key=lambda i: i.started_at, reverse=True)
         conn = get_db()
         rows = conn.execute(
             "SELECT * FROM paper_instances ORDER BY started_at DESC"
         ).fetchall()
         conn.close()
-        return [self._row_to_instance(r) for r in rows]
+        instances = [self._row_to_instance(r) for r in rows]
+        with _instance_cache_lock:
+            _instance_cache = {i.instance_id: i for i in instances}
+            _instance_cache_ts = time.time()
+        return instances
 
     def update_instance(self, instance_id: str, **kwargs):
+        _invalidate_instance_cache()
         conn = get_db()
         sets = ", ".join(f"{k} = ?" for k in kwargs)
         vals = list(kwargs.values()) + [instance_id]
@@ -101,6 +132,7 @@ class PaperTradingEngine:
         return True
 
     def delete_instance(self, instance_id: str):
+        _invalidate_instance_cache()
         self._running_instances.pop(instance_id, None)
         conn = get_db()
         conn.execute("DELETE FROM virtual_trades WHERE instance_id = ?", (instance_id,))
@@ -495,7 +527,7 @@ class PaperTradingEngine:
             started_at=row["started_at"],
             stopped_at=row["stopped_at"],
             timeframe=row["timeframe"],
-            total_equity=row["total_equity"] or 0,
+            total_equity=row["total_equity"] if row["total_equity"] else row["initial_capital"],
             total_return=row["total_return"] or 0,
             unrealized_pnl=row["unrealized_pnl"] or 0,
             realized_pnl=row["realized_pnl"] or 0,

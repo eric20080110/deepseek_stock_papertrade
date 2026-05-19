@@ -131,21 +131,15 @@ class _TursoConnection:
             },
             method="POST",
         )
-        last_err = None
-        for attempt in range(3):
-            try:
-                with urllib.request.urlopen(req, timeout=120) as resp:
-                    resp_data = json.loads(resp.read().decode("utf-8"))
-                for r in resp_data.get("results", []):
-                    if r.get("type") == "error":
-                        raise RuntimeError(f"Turso {label} error: {r.get('error', {}).get('message', str(r))}")
-                return resp_data
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
-                last_err = e
-                if attempt < 2:
-                    import time as _time
-                    _time.sleep(2 ** attempt)
-        raise RuntimeError(f"Turso {label} failed after 3 retries: {last_err}")
+        try:
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+            for r in resp_data.get("results", []):
+                if r.get("type") == "error":
+                    raise RuntimeError(f"Turso {label} error: {r.get('error', {}).get('message', str(r))}")
+            return resp_data
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
+            raise RuntimeError(f"Turso {label} failed: {e}") from e
 
     def execute(self, sql, params=None):
         resp = self._request(
