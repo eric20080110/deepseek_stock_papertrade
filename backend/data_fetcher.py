@@ -209,7 +209,7 @@ _MAX_AGE_SECONDS: dict[str, int] = {
 
 def _min_span(timeframe: str) -> int:
     bar_s = _BAR_SECONDS.get(timeframe, 3600)
-    return max(bar_s * 200, 30 * 86400)
+    return bar_s * 600
 
 
 def date_range(

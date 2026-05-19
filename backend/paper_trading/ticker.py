@@ -33,16 +33,22 @@ class PaperTicker:
     _BAR_SEC = {"1d": 86400, "1h": 3600, "30m": 1800, "15m": 900, "5m": 300, "1m": 60}
 
     async def _loop(self):
+        loop = asyncio.get_event_loop()
         while self._running:
             try:
                 instances = self._engine.list_instances()
                 intervals = []
+                tick_tasks = []
                 for inst in instances:
                     if inst.status != InstanceStatus.RUNNING or not inst.auto_tick:
                         continue
-                    self._engine.tick(inst.instance_id)
+                    tick_tasks.append(
+                        loop.run_in_executor(None, self._engine.tick, inst.instance_id)
+                    )
                     bar_sec = self._BAR_SEC.get(inst.timeframe or "1d", 86400)
                     intervals.append(min(inst.tick_interval_sec, bar_sec))
+                if tick_tasks:
+                    await asyncio.gather(*tick_tasks, return_exceptions=True)
                 sleep_sec = min(intervals) if intervals else 60
             except Exception as e:
                 logger.warning("PaperTicker tick error: %s", e)
