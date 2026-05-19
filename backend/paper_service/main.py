@@ -5,6 +5,8 @@ _BACKEND_DIR = os.path.join(_THIS_DIR, "..")
 sys.path.insert(0, _BACKEND_DIR)
 sys.path.insert(0, _THIS_DIR)
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,17 +16,54 @@ from paper_trading.ticker import PaperTicker  # uses backend's engine
 from paper_trading.models import InstanceStatus
 from routes.paper_trading import router as pt_router
 
+logger = logging.getLogger(__name__)
 ticker = PaperTicker(engine)
+_keepalive_task: asyncio.Task | None = None
+
+
+async def _keepalive_loop():
+    """Ping own /health every 10 min to prevent Render free-tier spin-down."""
+    import urllib.request
+    self_url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+    if not self_url:
+        logger.info("RENDER_EXTERNAL_URL not set — keepalive disabled")
+        return
+    while True:
+        await asyncio.sleep(600)
+        try:
+            urllib.request.urlopen(f"{self_url}/health", timeout=10)
+            logger.debug("keepalive ping sent to %s", self_url)
+        except Exception as e:
+            logger.warning("keepalive ping failed: %s", e)
 
 
 @asynccontextmanager
 async def lifespan(app):
-    import os
+    global _keepalive_task
     configured = bool(os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"))
     if configured:
         init_db()
         ticker.start()
+        _keepalive_task = asyncio.create_task(_keepalive_loop())
+        # Immediately tick all running instances on startup (covers gap when service was asleep)
+        try:
+            instances = engine.list_instances()
+            for inst in instances:
+                if inst.status == InstanceStatus.RUNNING:
+                    try:
+                        engine.tick(inst.instance_id)
+                    except Exception:
+                        pass
+            logger.info("Startup tick complete for %d running instances", sum(1 for i in instances if i.status == InstanceStatus.RUNNING))
+        except Exception as e:
+            logger.warning("Startup tick failed: %s", e)
     yield
+    if _keepalive_task:
+        _keepalive_task.cancel()
+        try:
+            await _keepalive_task
+        except asyncio.CancelledError:
+            pass
     if configured:
         await ticker.stop()
 
