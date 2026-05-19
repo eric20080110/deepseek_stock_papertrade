@@ -168,10 +168,10 @@ export function GenePoolPanel() {
     })
   }
 
-  if (loading) return <PageLoading label="載入基因庫中..." />
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {loading && <PageLoading />}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">基因庫</h1>
         <span className="text-sm text-gray-400">共 {totalChampions} 個冠軍個體</span>

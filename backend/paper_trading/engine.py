@@ -191,7 +191,8 @@ class PaperTradingEngine:
         now = int(time.time())
         df = DATA_CACHE.ensure(sym, timeframe=timeframe)
         if df is not None and len(df) > 0:
-            if now - int(df.index[-1]) <= bar_sec * 2:
+            # Only refetch when data is older than 5 bars to avoid Binance calls on every tick
+            if now - int(df.index[-1]) <= bar_sec * 5:
                 return df
         return DATA_CACHE.ensure(sym, timeframe=timeframe, force_refresh=True)
 

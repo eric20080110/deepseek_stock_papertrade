@@ -17,8 +17,6 @@ export function InstanceList({ onViewDetail }: Props) {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <PageLoading label="載入模擬實例中..." />
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {instances.map((inst) => (

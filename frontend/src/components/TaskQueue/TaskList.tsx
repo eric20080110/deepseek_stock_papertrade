@@ -33,10 +33,9 @@ export function TaskList() {
     FAILED: tasks.filter((t) => t.status === 'FAILED').length,
   }
 
-  if (loading) return <PageLoading label="載入任務列表中..." />
-
   return (
     <div className="p-6 max-w-4xl mx-auto">
+      {loading && <PageLoading />}
       <h1 className="text-2xl font-bold mb-4">任務隊列</h1>
       <div className="flex gap-2 mb-4">
         {(Object.entries(counts) as [Filter, number][]).map(([key, count]) => (

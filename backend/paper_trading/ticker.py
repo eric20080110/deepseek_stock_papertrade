@@ -1,9 +1,12 @@
 import asyncio
+import concurrent.futures
 import logging
 from paper_trading.engine import PaperTradingEngine
 from paper_trading.models import InstanceStatus
 
 logger = logging.getLogger(__name__)
+
+_TICKER_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="ticker")
 
 
 class PaperTicker:
@@ -43,7 +46,7 @@ class PaperTicker:
                     if inst.status != InstanceStatus.RUNNING or not inst.auto_tick:
                         continue
                     tick_tasks.append(
-                        loop.run_in_executor(None, self._engine.tick, inst.instance_id)
+                        loop.run_in_executor(_TICKER_POOL, self._engine.tick, inst.instance_id)
                     )
                     bar_sec = self._BAR_SEC.get(inst.timeframe or "1d", 86400)
                     intervals.append(min(inst.tick_interval_sec, bar_sec))
