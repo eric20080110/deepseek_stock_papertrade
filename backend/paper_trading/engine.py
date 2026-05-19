@@ -238,12 +238,12 @@ class PaperTradingEngine:
             # Next tick will pick up the fresh data once the background fetch completes.
             _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, timeframe, True)
             return df
-        # Nothing cached at all (cold start) — wait up to 10s for first fetch.
+        # Nothing cached at all (cold start) — wait up to 8s for first fetch.
         try:
             future = _DATA_FETCH_EXECUTOR.submit(
                 DATA_CACHE.ensure, sym, None, None, timeframe, True
             )
-            return future.result(timeout=10)
+            return future.result(timeout=8)
         except Exception:
             return None
 
@@ -302,10 +302,12 @@ class PaperTradingEngine:
         per_sym_capital = current_equity / max(len(symbols), 1)
 
         events = []
+        processed_syms = 0
         for sym in symbols:
             df = self._get_fresh_data(sym, timeframe)
             if df is None or len(df) < 50:
                 continue
+            processed_syms += 1
 
             from strategies.base import get_strategy_module
             mod = get_strategy_module(template_id)
@@ -345,6 +347,9 @@ class PaperTradingEngine:
                     self._close_position(instance_id, sym, latest_price, reason="take_profit")
                     events.append({"type": "close", "symbol": sym, "price": latest_price, "reason": "take_profit"})
 
+        # Skip expensive DB writes if no symbols had data (Binance unreachable)
+        if processed_syms == 0:
+            return {"instance_id": instance_id, "total_equity": current_equity, "events": []}
         total_equity = self._compute_total_equity(instance_id)
         self._update_instance_metrics(instance_id, total_equity)
         ts = int(time.time())
