@@ -130,13 +130,7 @@ class PaperTradingEngine:
             return
         symbols = json.loads(inst.symbols) if isinstance(inst.symbols, str) else inst.symbols
         params = json.loads(inst.params_json) if isinstance(inst.params_json, str) else inst.params_json
-        sid = inst.strategy_config_id
-        conn = get_db()
-        row = conn.execute(
-            "SELECT template_id FROM strategy_configs WHERE config_id = ?", (sid,)
-        ).fetchone()
-        conn.close()
-        template_id = row["template_id"] if row else sid
+        template_id = self._resolve_template_id(inst)
 
         conn = get_db()
         for sym in symbols:
@@ -155,19 +149,39 @@ class PaperTradingEngine:
             "timeframe": inst.timeframe or "1d",
         }
 
+    def _resolve_template_id(self, inst) -> str:
+        sid = inst.strategy_config_id
+        conn = get_db()
+        row = conn.execute(
+            "SELECT template_id FROM strategy_configs WHERE config_id = ?", (sid,)
+        ).fetchone()
+        if row:
+            conn.close()
+            return row["template_id"]
+        # Fallback: strategy_config_id might be an individual's strategy_id
+        if inst.source_task_id:
+            task = conn.execute(
+                "SELECT config_json FROM evolution_tasks WHERE task_id = ?", (inst.source_task_id,)
+            ).fetchone()
+            if task:
+                task_cfg = json.loads(task["config_json"])
+                cfg_id = task_cfg.get("strategy_config_id", "")
+                cfg_row = conn.execute(
+                    "SELECT template_id FROM strategy_configs WHERE config_id = ?", (cfg_id,)
+                ).fetchone()
+                if cfg_row:
+                    conn.close()
+                    return cfg_row["template_id"]
+        conn.close()
+        return sid
+
     def _ensure_context(self, instance_id: str):
         inst = self.get_instance(instance_id)
         if not inst:
             raise ValueError(f"Instance {instance_id} not found")
         symbols = json.loads(inst.symbols) if isinstance(inst.symbols, str) else inst.symbols
         params = json.loads(inst.params_json) if isinstance(inst.params_json, str) else inst.params_json
-
-        conn = get_db()
-        row = conn.execute(
-            "SELECT template_id FROM strategy_configs WHERE config_id = ?", (inst.strategy_config_id,)
-        ).fetchone()
-        conn.close()
-        template_id = row["template_id"] if row else inst.strategy_config_id
+        template_id = self._resolve_template_id(inst)
 
         self._running_instances[instance_id] = {
             "template_id": template_id,

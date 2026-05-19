@@ -314,6 +314,13 @@ CREATE TABLE IF NOT EXISTS virtual_trades (
     trigger_reason  TEXT DEFAULT 'strategy_signal'
 );
 CREATE INDEX IF NOT EXISTS idx_trades_inst ON virtual_trades(instance_id, signal_time);
+CREATE TABLE IF NOT EXISTS paper_equity_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id TEXT NOT NULL,
+    timestamp   INTEGER NOT NULL,
+    equity      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_equity_hist ON paper_equity_history(instance_id, timestamp);
 """
 
 _TURSO_SCHEMA = """
