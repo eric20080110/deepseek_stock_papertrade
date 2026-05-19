@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { ChevronDown, ChevronRight, Zap, Star, Pencil, Check, X, Trash2, Eye } from 'lucide-react'
 import { useTaskStore } from '../../store/taskStore'
 import { ChampionDetailDrawer } from './ChampionDetailDrawer'
+import { PageLoading } from '../LoadingSpinner'
 
 interface Champion {
   sid: string
@@ -41,6 +42,7 @@ interface GeneStrategy {
 
 export function GenePoolPanel() {
   const [data, setData] = useState<GeneStrategy[]>([])
+  const [loading, setLoading] = useState(true)
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [expandedStrategies, setExpandedStrategies] = useState<Set<string>>(new Set())
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
@@ -53,7 +55,11 @@ export function GenePoolPanel() {
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
 
   const load = useCallback(() => {
-    fetch(`/gene-pool${favoritesOnly ? '?favorites_only=true' : ''}`).then((r) => r.json()).then(setData)
+    setLoading(true)
+    fetch(`/gene-pool${favoritesOnly ? '?favorites_only=true' : ''}`)
+      .then((r) => r.json())
+      .then(setData)
+      .finally(() => setLoading(false))
   }, [favoritesOnly])
 
   useEffect(() => { load() }, [load])
@@ -161,6 +167,8 @@ export function GenePoolPanel() {
       return next
     })
   }
+
+  if (loading) return <PageLoading label="載入基因庫中..." />
 
   return (
     <div className="p-6 max-w-6xl mx-auto">

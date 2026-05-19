@@ -7,13 +7,17 @@ import { useTaskStore } from './store/taskStore'
 
 function App() {
   const setTasks = useTaskStore((s) => s.setTasks)
+  const setApiStatus = useTaskStore((s) => s.setApiStatus)
 
   useEffect(() => {
     const poll = () => {
-      fetch('/tasks').then((r) => r.json()).then(setTasks).catch(() => {})
+      fetch('/tasks')
+        .then((r) => { if (!r.ok) throw new Error(); return r.json() })
+        .then((data) => { setTasks(data); setApiStatus('ok') })
+        .catch(() => setApiStatus('error'))
     }
     poll()
-    const id = setInterval(poll, 3000)
+    const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [])
 

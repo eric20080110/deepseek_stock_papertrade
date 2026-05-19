@@ -14,12 +14,14 @@ interface TaskState {
   currentView: ViewType
   generationHistory: GenerationResult[]
   wsStatus: 'idle' | 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+  apiStatus: 'unknown' | 'ok' | 'error'
   selectedIndividualId: string | null
   selectedStrategy: string | null
   seedParams: Record<string, any> | null
   individualProgress: IndividualProgress | null
 
   setTasks: (tasks: EvolutionTask[]) => void
+  setApiStatus: (status: TaskState['apiStatus']) => void
   addTask: (task: EvolutionTask) => void
   updateTask: (taskId: string, updates: Partial<EvolutionTask>) => void
   setActiveTaskId: (id: string | null) => void
@@ -41,12 +43,14 @@ export const useTaskStore = create<TaskState>((set) => ({
   currentView: 'queue',
   generationHistory: [],
   wsStatus: 'idle',
+  apiStatus: 'unknown',
   selectedIndividualId: null,
   selectedStrategy: null,
   seedParams: null,
   individualProgress: null,
 
   setTasks: (tasks) => set({ tasks }),
+  setApiStatus: (apiStatus) => set({ apiStatus }),
   addTask: (task) => set((s) => ({ tasks: [task, ...s.tasks] })),
   updateTask: (taskId, updates) =>
     set((s) => ({

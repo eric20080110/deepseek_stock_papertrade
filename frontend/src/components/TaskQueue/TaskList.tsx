@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTaskStore } from '../../store/taskStore'
 import type { EvolutionTask } from '../../types/evolution'
 import { TaskCard } from './TaskCard'
+import { PageLoading } from '../LoadingSpinner'
 
 type Filter = 'all' | 'RUNNING' | 'QUEUED' | 'COMPLETED' | 'FAILED'
 
@@ -32,7 +33,7 @@ export function TaskList() {
     FAILED: tasks.filter((t) => t.status === 'FAILED').length,
   }
 
-  if (loading) return <div className="p-6 text-center text-gray-400">載入中...</div>
+  if (loading) return <PageLoading label="載入任務列表中..." />
 
   return (
     <div className="p-6 max-w-4xl mx-auto">

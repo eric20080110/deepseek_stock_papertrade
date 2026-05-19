@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { InstanceCard } from './InstanceCard'
+import { PageLoading } from '../LoadingSpinner'
 
 interface Props {
   onViewDetail: (id: string) => void
@@ -16,7 +17,7 @@ export function InstanceList({ onViewDetail }: Props) {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <div className="text-center py-12 text-gray-400">載入中...</div>
+  if (loading) return <PageLoading label="載入模擬實例中..." />
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

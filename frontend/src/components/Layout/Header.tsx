@@ -1,23 +1,34 @@
 import { useTaskStore } from '../../store/taskStore'
 
-const statusColors: Record<string, string> = {
+const wsColors: Record<string, string> = {
   CONNECTED: 'bg-green-500',
   CONNECTING: 'bg-yellow-500',
   RECONNECTING: 'bg-yellow-500',
   DISCONNECTED: 'bg-red-400',
 }
 
-const statusLabels: Record<string, string> = {
-  CONNECTED: '已連線',
-  CONNECTING: '連線中',
-  RECONNECTING: '重新連線',
-  DISCONNECTED: '連線中斷',
+const wsLabels: Record<string, string> = {
+  CONNECTED: 'WS 已連線',
+  CONNECTING: 'WS 連線中',
+  RECONNECTING: 'WS 重連中',
+  DISCONNECTED: 'WS 中斷',
 }
 
 export function Header() {
   const tasks = useTaskStore((s) => s.tasks)
   const activeTask = tasks.find((t) => t.status === 'RUNNING')
   const wsStatus = useTaskStore((s) => s.wsStatus)
+  const apiStatus = useTaskStore((s) => s.apiStatus)
+
+  const apiDot =
+    apiStatus === 'ok' ? 'bg-green-500' :
+    apiStatus === 'error' ? 'bg-red-500' :
+    'bg-gray-400 animate-pulse'
+
+  const apiLabel =
+    apiStatus === 'ok' ? '後端已連線' :
+    apiStatus === 'error' ? '後端無法連線' :
+    '連線中...'
 
   return (
     <header className="h-14 bg-white border-b flex items-center justify-between px-6 shrink-0">
@@ -42,10 +53,16 @@ export function Header() {
         )}
         {wsStatus !== 'idle' && (
           <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${statusColors[wsStatus.toUpperCase()] || 'bg-gray-400'}`} />
-            <span className="text-xs text-gray-400">{statusLabels[wsStatus.toUpperCase()] || wsStatus}</span>
+            <span className={`w-2 h-2 rounded-full ${wsColors[wsStatus.toUpperCase()] || 'bg-gray-400'}`} />
+            <span className="text-xs text-gray-400">{wsLabels[wsStatus.toUpperCase()] || wsStatus}</span>
           </div>
         )}
+        <div className="flex items-center gap-1.5" title={apiLabel}>
+          <span className={`w-2 h-2 rounded-full ${apiDot}`} />
+          <span className={`text-xs ${apiStatus === 'error' ? 'text-red-500' : 'text-gray-400'}`}>
+            {apiLabel}
+          </span>
+        </div>
       </div>
     </header>
   )
