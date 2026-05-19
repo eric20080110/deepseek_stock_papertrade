@@ -123,17 +123,22 @@ def tick_all():
     count = 0
     skipped = 0
     errors = []
+    timings = []
     for inst in instances:
         if inst.status == InstanceStatus.RUNNING:
+            t0 = _time.time()
             try:
                 result = engine.tick(inst.instance_id)
+                elapsed = round(_time.time() - t0, 2)
+                timings.append({"id": inst.instance_id[:8], "ms": int(elapsed * 1000)})
                 if result and result.get("skipped"):
                     skipped += 1
                 else:
                     count += 1
             except Exception as e:
-                logger.warning("tick %s error: %s", inst.instance_id, e)
-                errors.append({"instance_id": inst.instance_id, "error": str(e)})
+                elapsed = round(_time.time() - t0, 2)
+                logger.warning("tick %s error (%.1fs): %s", inst.instance_id, elapsed, e)
+                errors.append({"instance_id": inst.instance_id, "error": str(e), "ms": int(elapsed * 1000)})
 
     return {
         "ok": True,
@@ -141,6 +146,7 @@ def tick_all():
         "skipped": skipped,
         "total_instances": len(instances),
         "errors": errors,
+        "timings": timings,
         "cold_start": cold_start,
         "uptime_sec": uptime,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

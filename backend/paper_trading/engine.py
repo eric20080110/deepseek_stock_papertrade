@@ -289,7 +289,7 @@ class PaperTradingEngine:
         last_tick = ctx.get("_last_tick_ts", 0)
         cooldown = max(30, inst.tick_interval_sec // 2) if inst.tick_interval_sec else 30
         if now - last_tick < cooldown:
-            return {"instance_id": instance_id, "total_equity": self._compute_total_equity(instance_id), "events": [], "skipped": True}
+            return {"instance_id": instance_id, "events": [], "skipped": True}
         ctx["_last_tick_ts"] = now
 
         symbols = ctx["symbols"]
