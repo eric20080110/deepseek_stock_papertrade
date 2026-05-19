@@ -285,16 +285,21 @@ class PaperTradingEngine:
             pass
 
     def tick(self, instance_id: str) -> Optional[dict]:
+        _t = {"start": time.time()}
         inst = self.get_instance(instance_id)
+        _t["get_inst"] = time.time()
         if not inst or inst.status != InstanceStatus.RUNNING:
             return None
+        ensure_called = False
         if instance_id not in self._running_instances:
+            ensure_called = True
             try:
                 self._ensure_context(instance_id)
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning("tick _ensure_context error for %s: %s", instance_id, e)
                 return None
+        _t["ensure"] = time.time()
         ctx = self._running_instances.get(instance_id)
         if not ctx:
             return None
@@ -315,19 +320,25 @@ class PaperTradingEngine:
 
         # Bug 2 fix: use current total equity for per-symbol capital so realized PnL flows back in
         current_equity = self._compute_total_equity(instance_id)
+        _t["equity"] = time.time()
         per_sym_capital = current_equity / max(len(symbols), 1)
 
         events = []
         processed_syms = 0
+        _sym_ms: list = []
         for sym in symbols:
+            _ts0 = time.time()
             df = self._get_fresh_data(sym, timeframe)
+            _t[f"data_{sym}"] = time.time()
             if df is None or len(df) < 50:
+                _sym_ms.append({"sym": sym, "ms": int((time.time()-_ts0)*1000), "skip": "no_data"})
                 continue
             processed_syms += 1
 
             from strategies.base import get_strategy_module
             mod = get_strategy_module(template_id)
             if mod is None:
+                _sym_ms.append({"sym": sym, "ms": int((time.time()-_ts0)*1000), "skip": "no_mod"})
                 continue
             try:
                 signals = mod.generate_signals(df, params)
@@ -362,17 +373,34 @@ class PaperTradingEngine:
                 elif tp_pct > 0 and upnl_pct >= tp_pct:
                     self._close_position(instance_id, sym, latest_price, reason="take_profit")
                     events.append({"type": "close", "symbol": sym, "price": latest_price, "reason": "take_profit"})
+            _sym_ms.append({"sym": sym, "ms": int((time.time()-_ts0)*1000)})
 
         # Skip DB writes if no symbols had usable data (Binance unreachable)
         if processed_syms == 0:
-            return {"instance_id": instance_id, "total_equity": current_equity, "events": []}
+            return {"instance_id": instance_id, "total_equity": current_equity, "events": [],
+                    "_dbg": {"ensure": ensure_called, "sym_ms": _sym_ms,
+                             "get_inst_ms": int((_t["get_inst"]-_t["start"])*1000),
+                             "ensure_ms": int((_t["ensure"]-_t["get_inst"])*1000)}}
         total_equity = self._compute_total_equity(instance_id)
         # Only update metrics/equity in DB when there were actual trades or periodically
         if events:
             self._update_instance_metrics(instance_id, total_equity)
+        _t["metrics"] = time.time()
         ts = int(time.time())
         self._save_equity_point(instance_id, ts, total_equity)
-        result = {"instance_id": instance_id, "total_equity": total_equity, "events": events}
+        _t["equity_save"] = time.time()
+        result = {
+            "instance_id": instance_id, "total_equity": total_equity, "events": events,
+            "_dbg": {
+                "ensure": ensure_called,
+                "get_inst_ms": int((_t["get_inst"]-_t["start"])*1000),
+                "ensure_ms": int((_t["ensure"]-_t["get_inst"])*1000),
+                "equity_ms": int((_t["equity"]-_t["ensure"])*1000),
+                "sym_ms": _sym_ms,
+                "metrics_ms": int((_t["metrics"]-_t.get("equity",_t["ensure"]))*1000) if "metrics" in _t else 0,
+                "save_equity_ms": int((_t["equity_save"]-_t["metrics"])*1000) if "metrics" in _t else 0,
+            }
+        }
         for cb in self._tick_callbacks:
             try:
                 cb(instance_id, result)

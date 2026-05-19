@@ -135,10 +135,14 @@ def tick_all():
                     skipped += 1
                 else:
                     count += 1
+                dbg = result.get("_dbg") if result else None
+                if dbg:
+                    timings[-1]["dbg"] = dbg
             except Exception as e:
                 elapsed = round(_time.time() - t0, 2)
                 logger.warning("tick %s error (%.1fs): %s", inst.instance_id, elapsed, e)
                 errors.append({"instance_id": inst.instance_id, "error": str(e), "ms": int(elapsed * 1000)})
+                continue
 
     return {
         "ok": True,
