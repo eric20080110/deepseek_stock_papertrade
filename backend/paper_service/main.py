@@ -18,6 +18,7 @@ from routes.paper_trading import router as pt_router
 
 logger = logging.getLogger(__name__)
 ticker = PaperTicker(engine)
+_startup_time: float = 0.0
 _keepalive_task: asyncio.Task | None = None
 
 
@@ -39,7 +40,9 @@ async def _keepalive_loop():
 
 @asynccontextmanager
 async def lifespan(app):
-    global _keepalive_task
+    global _keepalive_task, _startup_time
+    import time as _time
+    _startup_time = _time.time()
     configured = bool(os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"))
     if configured:
         init_db()
@@ -94,24 +97,37 @@ def health():
 
 @app.post("/tick")
 def tick_all():
+    import time as _time
+    from datetime import datetime, timezone
+    now = _time.time()
+    uptime = int(now - _startup_time) if _startup_time else 0
+    cold_start = uptime < 90  # service just woke up from Render spin-down
+
     instances = engine.list_instances()
     count = 0
+    skipped = 0
     errors = []
     for inst in instances:
         if inst.status == InstanceStatus.RUNNING:
             try:
-                engine.tick(inst.instance_id)
-                count += 1
+                result = engine.tick(inst.instance_id)
+                if result and result.get("skipped"):
+                    skipped += 1
+                else:
+                    count += 1
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning("tick %s error: %s", inst.instance_id, e)
+                logger.warning("tick %s error: %s", inst.instance_id, e)
                 errors.append({"instance_id": inst.instance_id, "error": str(e)})
+
     return {
+        "ok": True,
         "ticked": count,
+        "skipped": skipped,
         "total_instances": len(instances),
         "errors": errors,
-        "version": "v1d333b7",
-        "running_keys": list(engine._running_instances.keys()) if hasattr(engine, '_running_instances') else [],
+        "cold_start": cold_start,
+        "uptime_sec": uptime,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
 
