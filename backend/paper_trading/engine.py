@@ -234,16 +234,18 @@ class PaperTradingEngine:
         if df is not None and len(df) > 0:
             if now - int(df.index[-1]) <= bar_sec * 5:
                 return df
-        # Stale or missing — refresh with a hard 10s deadline so we never block the tick loop.
-        # If Binance is rate-limited or unreachable, fall back to stale data rather than hang.
+            # Stale — kick off background refresh and return current data immediately.
+            # Next tick will pick up the fresh data once the background fetch completes.
+            _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, timeframe, True)
+            return df
+        # Nothing cached at all (cold start) — wait up to 10s for first fetch.
         try:
             future = _DATA_FETCH_EXECUTOR.submit(
                 DATA_CACHE.ensure, sym, None, None, timeframe, True
             )
-            refreshed = future.result(timeout=10)
-            return refreshed if refreshed is not None else df
+            return future.result(timeout=10)
         except Exception:
-            return df
+            return None
 
     def _save_equity_point(self, instance_id: str, ts: int, equity: float):
         ctx = self._running_instances.get(instance_id)
