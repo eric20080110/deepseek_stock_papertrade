@@ -18,17 +18,10 @@ def get_db():
 
 class PaperTradingEngine:
     def __init__(self):
-        self.MAX_INSTANCES = 5
         self._running_instances: dict[str, dict] = {}
 
     def create_instance(self, req: CreateInstanceRequest) -> PaperInstance:
         conn = get_db()
-        running = conn.execute(
-            "SELECT COUNT(*) FROM paper_instances WHERE status IN ('INITIALIZING','RUNNING','PAUSED')"
-        ).fetchone()[0]
-        if running >= self.MAX_INSTANCES:
-            raise ValueError(f"Max {self.MAX_INSTANCES} instances allowed")
-
         instance_id = str(uuid.uuid4())
         now = int(time.time())
         conn.execute(
