@@ -29,7 +29,7 @@ async def _keepalive_loop():
         logger.info("RENDER_EXTERNAL_URL not set — keepalive disabled")
         return
     while True:
-        await asyncio.sleep(600)
+        await asyncio.sleep(240)
         try:
             urllib.request.urlopen(f"{self_url}/health", timeout=10)
             logger.debug("keepalive ping sent to %s", self_url)
