@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useTaskStore } from '../../store/taskStore'
 import type { ViewType } from '../../types/evolution'
 import { Layers, PlusCircle, List, Activity, BarChart3, Gauge, Dna } from 'lucide-react'
+import { DbStatusPanel } from './DbStatusPanel'
 
 const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
   { id: 'strategy', label: '策略管理', icon: <Layers className="w-4 h-4" /> },
@@ -38,7 +39,8 @@ export function Sidebar() {
           </button>
         ))}
       </nav>
-      <div className="p-3 border-t text-xs text-gray-400 space-y-1">
+      <DbStatusPanel />
+      <div className="px-3 pb-3 text-xs text-gray-400 space-y-1">
         {activeTask && (
           <div>
             <span className="text-blue-600 font-medium">執行中</span>

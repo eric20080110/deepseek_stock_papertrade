@@ -56,3 +56,72 @@ app.include_router(gene_pool_router)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/system/db-status")
+def db_status():
+    import os, time
+    from database import LOCAL_DB_PATH, TURSO_URL, TURSO_TOKEN, get_db, get_turso
+
+    # --- Local SQLite ---
+    local_ok = False
+    local_size_bytes = 0
+    local_rows: dict[str, int] = {}
+    try:
+        conn = get_db()
+        local_ok = True
+        local_size_bytes = os.path.getsize(LOCAL_DB_PATH) if os.path.exists(LOCAL_DB_PATH) else 0
+        for tbl in ("evolution_tasks", "individuals", "strategy_configs", "paper_instances",
+                    "virtual_trades", "paper_equity_history", "ohlcv_data"):
+            try:
+                r = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()
+                local_rows[tbl] = r[0] if r else 0
+            except Exception:
+                local_rows[tbl] = 0
+        conn.close()
+    except Exception as e:
+        local_ok = False
+
+    def _fmt(b: int) -> str:
+        if b >= 1 << 30:
+            return f"{b / (1 << 30):.1f} GB"
+        if b >= 1 << 20:
+            return f"{b / (1 << 20):.1f} MB"
+        if b >= 1 << 10:
+            return f"{b / (1 << 10):.1f} KB"
+        return f"{b} B"
+
+    # --- Turso ---
+    turso_configured = bool(TURSO_URL and TURSO_TOKEN)
+    turso_ok = False
+    turso_rows: dict[str, int] = {}
+    turso_latency_ms: float | None = None
+    if turso_configured:
+        try:
+            t = get_turso()
+            t0 = time.monotonic()
+            for tbl in ("strategy_configs", "paper_instances", "virtual_trades", "paper_equity_history"):
+                try:
+                    r = t.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()
+                    turso_rows[tbl] = r[0] if r else 0
+                except Exception:
+                    turso_rows[tbl] = 0
+            turso_latency_ms = round((time.monotonic() - t0) * 1000)
+            turso_ok = True
+        except Exception:
+            turso_ok = False
+
+    return {
+        "local": {
+            "connected": local_ok,
+            "size": _fmt(local_size_bytes),
+            "size_bytes": local_size_bytes,
+            "rows": local_rows,
+        },
+        "turso": {
+            "configured": turso_configured,
+            "connected": turso_ok,
+            "latency_ms": turso_latency_ms,
+            "rows": turso_rows,
+        },
+    }
