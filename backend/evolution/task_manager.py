@@ -202,7 +202,14 @@ class TaskManager:
         params.extend([limit, offset])
         rows = conn.execute(sql, params).fetchall()
         conn.close()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            # Strip large blob fields from list responses — use /equity-curve endpoint instead
+            d.pop("equity_curve_json", None)
+            d.pop("symbol_results_json", None)
+            result.append(d)
+        return result
 
     def get_pareto_fronts(self, task_id: str) -> list[dict]:
         conn = get_db()

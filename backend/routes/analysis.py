@@ -10,6 +10,17 @@ from backtest.data_cache import DATA_CACHE
 router = APIRouter(prefix="/tasks/{task_id}", tags=["analysis"])
 tm = TaskManager()
 
+_MAX_CHART_PTS = 1000
+
+
+def _downsample(series: list, max_pts: int = _MAX_CHART_PTS) -> list:
+    """Reduce a series to at most max_pts by picking evenly-spaced indices."""
+    n = len(series)
+    if n <= max_pts:
+        return series
+    step = n / max_pts
+    return [series[int(i * step)] for i in range(max_pts)]
+
 
 def _task_config(task_id: str):
     task = tm.get_task(task_id)
@@ -23,8 +34,15 @@ def _ohlcv_prices(symbol: str, start_date: str, end_date: str, timeframe: str) -
     if df is None or df.empty:
         return [], []
     from datetime import datetime
-    dates = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in df.index.tolist()]
+    timestamps = df.index.tolist()
     prices = [round(float(p), 2) for p in df["close"].tolist()]
+    # Downsample before building date strings (expensive on 500k rows)
+    if len(prices) > _MAX_CHART_PTS:
+        step = len(prices) / _MAX_CHART_PTS
+        idx = [int(i * step) for i in range(_MAX_CHART_PTS)]
+        prices = [prices[i] for i in idx]
+        timestamps = [timestamps[i] for i in idx]
+    dates = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in timestamps]
     return prices, dates
 
 
@@ -44,7 +62,7 @@ def _dca_curve(symbol: str, start_date: str, end_date: str, timeframe: str, capi
         cash -= investment
         shares += investment / price
         curve.append(round(shares * price + cash, 2))
-    return curve
+    return _downsample(curve)
 
 
 
@@ -108,11 +126,8 @@ def get_individual(task_id: str, sid: str):
     if not row:
         raise HTTPException(404, "Individual not found")
     d = dict(row)
-    if d["equity_curve_json"]:
-        raw = json.loads(d["equity_curve_json"])
-        d["equity_curve"] = raw if isinstance(raw, list) else raw.get("v", [])
-    if d["symbol_results_json"]:
-        d["symbol_results"] = json.loads(d["symbol_results_json"])
+    d.pop("equity_curve_json", None)
+    d.pop("symbol_results_json", None)
     if d["params_json"]:
         d["params"] = json.loads(d["params_json"])
     return d
@@ -137,8 +152,23 @@ def individual_equity_curve(task_id: str, sid: str):
 
     result: dict = {}
 
-    # Re-run backtest on full date range so curve covers start_date→end_date (not just IS 70%)
+    # Re-run backtest on full date range to cover IS+OOS, but skip for large datasets
+    # (1m/5m with long date ranges produce 500k+ bars — too slow to re-run)
+    _RERUN_BAR_LIMIT = 10000
+    should_rerun = False
     if config and params:
+        tf = config.timeframe or "1d"
+        bar_secs = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
+        from datetime import datetime as _dt
+        try:
+            sd_ts = int(_dt.strptime(config.start_date, "%Y-%m-%d").timestamp())
+            ed_ts = int(_dt.strptime(config.end_date, "%Y-%m-%d").timestamp())
+            est_bars = (ed_ts - sd_ts) // bar_secs.get(tf, 86400)
+        except Exception:
+            est_bars = 0
+        should_rerun = est_bars <= _RERUN_BAR_LIMIT
+
+    if should_rerun:
         conn2 = get_db()
         cfg_row = conn2.execute(
             "SELECT template_id, config_id FROM strategy_configs WHERE config_id = ?",
@@ -158,10 +188,12 @@ def individual_equity_curve(task_id: str, sid: str):
 
         if full_results:
             min_len = min(len(sr.equity_curve) for sr in full_results)
-            result["equity_curve"] = [round(float(np.mean([sr.equity_curve[i] for sr in full_results])), 2) for i in range(min_len)]
+            raw_curve = [round(float(np.mean([sr.equity_curve[i] for sr in full_results])), 2) for i in range(min_len)]
+            result["equity_curve"] = _downsample(raw_curve)
             ts_full = full_results[0].equity_timestamps or []
-            result["dates"] = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in ts_full[:min_len]] if ts_full else []
-            result["symbol_curves"] = {sr.symbol: sr.equity_curve for sr in full_results}
+            ds_idx = [int(i * min_len / len(result["equity_curve"])) for i in range(len(result["equity_curve"]))] if ts_full else []
+            result["dates"] = [datetime.utcfromtimestamp(ts_full[i]).strftime("%Y-%m-%d %H:%M") for i in ds_idx] if ts_full else []
+            result["symbol_curves"] = {sr.symbol: _downsample(sr.equity_curve) for sr in full_results}
             result["symbol_trades"] = {
                 sr.symbol: [
                     {"entry_bar": t.entry_bar, "exit_bar": t.exit_bar,
@@ -172,20 +204,28 @@ def individual_equity_curve(task_id: str, sid: str):
                 for sr in full_results
             }
 
-    # Fallback: use stored IS equity curve
+    # Fallback: use stored IS equity curve (downsampled)
     if "equity_curve" not in result:
         ts = []
         if row["equity_curve_json"]:
             raw = json.loads(row["equity_curve_json"])
             if isinstance(raw, dict):
-                result["equity_curve"] = raw.get("v", [])
+                raw_curve = raw.get("v", [])
                 ts = raw.get("t", [])
             else:
-                result["equity_curve"] = raw
-        result["dates"] = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in ts] if ts else []
+                raw_curve = raw
+                ts = []
+            result["equity_curve"] = _downsample(raw_curve)
+            # Align timestamps to downsampled indices
+            if ts:
+                step = len(raw_curve) / len(result["equity_curve"]) if result["equity_curve"] else 1
+                ds_ts = [ts[min(int(i * step), len(ts) - 1)] for i in range(len(result["equity_curve"]))]
+                result["dates"] = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in ds_ts]
+            else:
+                result["dates"] = []
         if row["symbol_results_json"]:
             sym_data = json.loads(row["symbol_results_json"])
-            result.setdefault("symbol_curves", {sym: info.get("equity_curve", []) for sym, info in sym_data.items()})
+            result.setdefault("symbol_curves", {sym: _downsample(info.get("equity_curve", [])) for sym, info in sym_data.items()})
             result.setdefault("symbol_trades", {
                 sym: [
                     {"entry_bar": t["entry_bar"], "exit_bar": t["exit_bar"],
