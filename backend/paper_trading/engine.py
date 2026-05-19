@@ -2,7 +2,12 @@ import json
 import time
 import uuid
 import threading
+import concurrent.futures
 from typing import Optional
+
+_DATA_FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=3, thread_name_prefix="paper_data"
+)
 
 from database import get_turso as _get_turso, get_db as _get_local
 from paper_trading.models import (
@@ -227,10 +232,18 @@ class PaperTradingEngine:
         now = int(time.time())
         df = DATA_CACHE.ensure(sym, timeframe=timeframe)
         if df is not None and len(df) > 0:
-            # Only refetch when data is older than 5 bars to avoid Binance calls on every tick
             if now - int(df.index[-1]) <= bar_sec * 5:
                 return df
-        return DATA_CACHE.ensure(sym, timeframe=timeframe, force_refresh=True)
+        # Stale or missing — refresh with a hard 10s deadline so we never block the tick loop.
+        # If Binance is rate-limited or unreachable, fall back to stale data rather than hang.
+        try:
+            future = _DATA_FETCH_EXECUTOR.submit(
+                DATA_CACHE.ensure, sym, None, None, timeframe, True
+            )
+            refreshed = future.result(timeout=10)
+            return refreshed if refreshed is not None else df
+        except Exception:
+            return df
 
     def _save_equity_point(self, instance_id: str, ts: int, equity: float):
         ctx = self._running_instances.get(instance_id)
