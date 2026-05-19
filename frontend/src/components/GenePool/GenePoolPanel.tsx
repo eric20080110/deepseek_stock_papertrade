@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Zap, Star, Pencil, Check, X, Trash2, Eye } f
 import { useTaskStore } from '../../store/taskStore'
 import { ChampionDetailDrawer } from './ChampionDetailDrawer'
 import { PageLoading } from '../LoadingSpinner'
+import { toast } from '../../lib/toast'
 
 interface Champion {
   sid: string
@@ -51,6 +52,14 @@ export function GenePoolPanel() {
   const [detailChampion, setDetailChampion] = useState<{ taskId: string; sid: string } | null>(null)
   const [editingTaskName, setEditingTaskName] = useState<Record<string, boolean>>({})
   const [draftTaskNames, setDraftTaskNames] = useState<Record<string, string>>({})
+
+  // Deploy dialog state
+  const [deployTarget, setDeployTarget] = useState<{
+    champion: Champion; task: GeneTask; configId: string
+  } | null>(null)
+  const [deployCapital, setDeployCapital] = useState(10000)
+  const [deployTimeframe, setDeployTimeframe] = useState('')
+  const [deploying, setDeploying] = useState(false)
 
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
 
@@ -120,7 +129,16 @@ export function GenePoolPanel() {
     load()
   }
 
-  const deployPT = async (c: Champion, task: GeneTask, strategyConfigId: string) => {
+  const openDeployDialog = (c: Champion, task: GeneTask, configId: string) => {
+    setDeployTarget({ champion: c, task, configId })
+    setDeployCapital(10000)
+    setDeployTimeframe(task.timeframe || '1d')
+  }
+
+  const confirmDeploy = async () => {
+    if (!deployTarget) return
+    const { champion: c, task, configId } = deployTarget
+    setDeploying(true)
     try {
       const params = JSON.parse(c.params_json || '{}')
       const res = await fetch('/paper-trading', {
@@ -130,23 +148,25 @@ export function GenePoolPanel() {
           source: 'evolution',
           source_task_id: task.task_id,
           source_individual_id: c.sid,
-          strategy_config_id: strategyConfigId,
+          strategy_config_id: configId,
           params,
           symbols: task.symbols,
-          initial_capital: 10000,
-          timeframe: task.timeframe,
+          initial_capital: deployCapital,
+          timeframe: deployTimeframe,
         }),
       })
       if (res.ok) {
-        alert('已部署至模擬跑盤！')
+        toast.success('已部署至模擬跑盤！')
+        setDeployTarget(null)
         setCurrentView('paper-trading')
       } else {
         const errBody = await res.text()
-        alert(`部署失敗 (${res.status}): ${errBody}`)
+        toast.error(`部署失敗 (${res.status}): ${errBody}`)
       }
     } catch (e) {
-      console.error(e)
-      alert('部署失敗: ' + String(e))
+      toast.error('部署失敗: ' + String(e))
+    } finally {
+      setDeploying(false)
     }
   }
 
@@ -296,7 +316,7 @@ export function GenePoolPanel() {
                                 className="px-2 py-0.5 text-xs border border-gray-200 text-gray-600 rounded hover:bg-gray-50 cursor-pointer">
                                 <Eye className="w-3 h-3 inline-block" />
                               </button>
-                              <button onClick={() => deployPT(c, task, strategy.config_id)}
+                              <button onClick={() => openDeployDialog(c, task, strategy.config_id)}
                                 className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer">
                                 <Zap className="w-3 h-3 inline-block" /> 跑盤
                               </button>
@@ -328,6 +348,52 @@ export function GenePoolPanel() {
           sid={detailChampion.sid}
           onClose={() => setDetailChampion(null)}
         />
+      )}
+
+      {/* Deploy dialog */}
+      {deployTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-80 space-y-4">
+            <h3 className="font-semibold text-lg">部署至模擬跑盤</h3>
+            <p className="text-sm text-gray-500 truncate">
+              {deployTarget.champion.custom_name || `${deployTarget.task.task_name}-G${deployTarget.champion.generation}-${deployTarget.champion.idx}`}
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">初始資金 (USDT)</label>
+              <input
+                type="number" min={100} step={100}
+                value={deployCapital}
+                onChange={(e) => setDeployCapital(Number(e.target.value))}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">時間精度</label>
+              <select
+                value={deployTimeframe}
+                onChange={(e) => setDeployTimeframe(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {['1m', '5m', '15m', '30m', '1h', '1d'].map((tf) => (
+                  <option key={tf} value={tf}>{tf}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setDeployTarget(null)}
+                className="flex-1 px-4 py-2 text-sm border rounded-lg hover:bg-gray-50 cursor-pointer">
+                取消
+              </button>
+              <button
+                onClick={confirmDeploy}
+                disabled={deploying}
+                className="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 cursor-pointer">
+                {deploying ? '部署中…' : '確認部署'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

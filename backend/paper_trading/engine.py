@@ -19,6 +19,10 @@ def get_db():
 class PaperTradingEngine:
     def __init__(self):
         self._running_instances: dict[str, dict] = {}
+        self._tick_callbacks: list = []
+
+    def register_tick_callback(self, cb):
+        self._tick_callbacks.append(cb)
 
     def create_instance(self, req: CreateInstanceRequest) -> PaperInstance:
         conn = get_db()
@@ -237,6 +241,10 @@ class PaperTradingEngine:
         template_id = ctx["template_id"]
         timeframe = ctx.get("timeframe", inst.timeframe or "1d")
 
+        # Bug 2 fix: use current total equity for per-symbol capital so realized PnL flows back in
+        current_equity = self._compute_total_equity(instance_id)
+        per_sym_capital = current_equity / max(len(symbols), 1)
+
         events = []
         for sym in symbols:
             df = self._get_fresh_data(sym, timeframe)
@@ -263,17 +271,35 @@ class PaperTradingEngine:
                     events.append({"type": "close", "symbol": sym, "price": latest_price, "reason": "signal"})
                     current_side = "flat"
 
-                per_sym_capital = inst.initial_capital / max(len(symbols), 1)
                 self._open_position(instance_id, sym, signal, latest_price, per_sym_capital)
                 events.append({"type": "open", "symbol": sym, "side": "long" if signal == 1 else "short", "price": latest_price})
 
             self._update_position_price(instance_id, sym, latest_price)
 
+            # Bug 4 fix: check stop-loss / take-profit after price update
+            pos = self._get_position(instance_id, sym)
+            if pos and pos["side"] != "flat":
+                sl_pct = float(params.get("stop_loss_pct", 0) or 0)
+                tp_pct = float(params.get("take_profit_pct", 0) or 0)
+                upnl_pct = float(pos.get("unrealized_pnl_pct", 0) or 0)
+                if sl_pct > 0 and upnl_pct <= -sl_pct:
+                    self._close_position(instance_id, sym, latest_price, reason="stop_loss")
+                    events.append({"type": "close", "symbol": sym, "price": latest_price, "reason": "stop_loss"})
+                elif tp_pct > 0 and upnl_pct >= tp_pct:
+                    self._close_position(instance_id, sym, latest_price, reason="take_profit")
+                    events.append({"type": "close", "symbol": sym, "price": latest_price, "reason": "take_profit"})
+
         total_equity = self._compute_total_equity(instance_id)
         self._update_instance_metrics(instance_id, total_equity)
         ts = int(time.time())
         self._save_equity_point(instance_id, ts, total_equity)
-        return {"instance_id": instance_id, "total_equity": total_equity, "events": events}
+        result = {"instance_id": instance_id, "total_equity": total_equity, "events": events}
+        for cb in self._tick_callbacks:
+            try:
+                cb(instance_id, result)
+            except Exception:
+                pass
+        return result
 
     def _get_position(self, instance_id: str, symbol: str) -> Optional[dict]:
         conn = get_db()
@@ -286,7 +312,9 @@ class PaperTradingEngine:
 
     def _open_position(self, instance_id: str, symbol: str, direction: int, price: float, capital: float):
         conn = get_db()
-        qty = (capital * 0.99) / price
+        # Bug 3 fix: charge 0.1% opening fee; qty net of fee
+        qty = (capital * 0.999) / price
+        fee = qty * price * 0.001
         now = int(time.time())
         conn.execute(
             """UPDATE virtual_positions SET side=?, entry_price=?, entry_time=?,
@@ -298,19 +326,20 @@ class PaperTradingEngine:
             """INSERT INTO virtual_trades (trade_id, instance_id, symbol, side, price, quantity, fee, signal_time, executed_time)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (str(uuid.uuid4()), instance_id, symbol, "buy" if direction == 1 else "sell",
-             price, qty, 0, now, now),
+             price, qty, round(fee, 6), now, now),
         )
         conn.commit()
         conn.close()
 
-    def _close_position(self, instance_id: str, symbol: str, price: float):
+    def _close_position(self, instance_id: str, symbol: str, price: float, reason: str = "signal"):
         pos = self._get_position(instance_id, symbol)
         if not pos or pos["side"] == "flat":
             return
         entry = pos["entry_price"]
         qty = pos["quantity"]
         pnl = qty * (price - entry) if pos["side"] == "long" else qty * (entry - price)
-        pnl -= qty * price * 0.001
+        close_fee = qty * price * 0.001
+        pnl -= close_fee
         now = int(time.time())
         conn = get_db()
         conn.execute(
@@ -324,7 +353,7 @@ class PaperTradingEngine:
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (str(uuid.uuid4()), instance_id, symbol,
              "sell" if pos["side"] == "long" else "buy",
-             price, qty, qty * price * 0.001, round(pnl, 2), now, now, "signal"),
+             price, qty, round(close_fee, 6), round(pnl, 2), now, now, reason),
         )
         conn.commit()
         conn.close()
@@ -383,7 +412,12 @@ class PaperTradingEngine:
         capital = inst.initial_capital
         total_return = ((total_equity - capital) / capital) * 100 if capital > 0 else 0
 
-        peak = max(inst.total_equity, capital)
+        # Bug 1 fix: track running equity peak in context so drawdown reflects true historical peak
+        ctx = self._running_instances.get(instance_id, {})
+        stored_peak = ctx.get("_equity_peak", capital)
+        peak = max(stored_peak, total_equity, capital)
+        if instance_id in self._running_instances:
+            self._running_instances[instance_id]["_equity_peak"] = peak
         drawdown = ((peak - total_equity) / peak * 100) if peak > 0 else 0
         max_dd = max(inst.max_drawdown, drawdown)
 

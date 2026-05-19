@@ -14,6 +14,7 @@ from routes.evolution import set_event_loop
 from routes.analysis import router as analysis_router
 from routes.paper_trading import router as paper_trading_router
 from routes.paper_trading import engine as paper_engine
+from routes.paper_trading import set_event_loop as set_pt_event_loop
 from routes.gene_pool import router as gene_pool_router
 from paper_trading.ticker import PaperTicker
 
@@ -22,7 +23,9 @@ ticker = PaperTicker(paper_engine)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    set_event_loop(asyncio.get_running_loop())
+    loop = asyncio.get_running_loop()
+    set_event_loop(loop)
+    set_pt_event_loop(loop)
     init_db()
     seed_templates()
     ticker.start()

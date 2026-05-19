@@ -2,6 +2,7 @@ import type { EvolutionTask } from '../../types/evolution'
 import { useTaskStore } from '../../store/taskStore'
 import { useState } from 'react'
 import { Trash2, Pencil, Check, X } from 'lucide-react'
+import { toast } from '../../lib/toast'
 
 const statusConfig: Record<string, { color: string; label: string }> = {
   QUEUED: { color: 'bg-gray-400', label: '排隊中' },
@@ -44,8 +45,15 @@ export function TaskCard({ task, onRefresh }: Props) {
   const handleDelete = async () => {
     if (!confirm(`確定永久刪除此任務？\n${task.task_id.slice(0, 12)}...`)) return
     setDeleting(true)
-    await fetch(`/tasks/${task.task_id}?purge=true`, { method: 'DELETE' })
-    onRefresh()
+    try {
+      const res = await fetch(`/tasks/${task.task_id}?purge=true`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`${res.status}`)
+      toast.success('任務已刪除')
+      onRefresh()
+    } catch (e) {
+      toast.error('刪除失敗，請重試')
+      setDeleting(false)
+    }
   }
 
   const handleViewResults = () => {

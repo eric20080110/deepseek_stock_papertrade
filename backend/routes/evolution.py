@@ -151,8 +151,11 @@ def cancel_task(task_id: str, purge: bool = False):
         local.execute("DELETE FROM evolution_tasks WHERE task_id = ?", (task_id,))
         local.commit()
         local.close()
-        t = get_turso()
-        t.execute("DELETE FROM evolution_task_results WHERE task_id = ?", (task_id,))
+        try:
+            t = get_turso()
+            t.execute("DELETE FROM evolution_task_results WHERE task_id = ?", (task_id,))
+        except Exception:
+            pass
         return {"detail": "Task purged"}
     ok = task_manager.cancel_task(task_id)
     if not ok:

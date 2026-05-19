@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { usePaperTradingWS } from '../../hooks/usePaperTradingWS'
 
 interface Props {
   instanceId: string
@@ -16,29 +17,41 @@ export function InstanceDetail({ instanceId }: Props) {
   const [symbolsList, setSymbolsList] = useState<string[]>([])
   const priceChartDataRef = useRef<{ prices: Record<string, { dates: string[]; values: number[] }>; trades: any[] }>({ prices: {}, trades: [] })
 
-  function refreshAll() {
-    fetch(`/paper-trading/${instanceId}`).then((r) => r.json()).then(setInstance)
+  const refreshPositionsAndTrades = useCallback(() => {
     fetch(`/paper-trading/${instanceId}/positions`).then((r) => r.json()).then(setPositions)
     fetch(`/paper-trading/${instanceId}/trades`).then((r) => r.json()).then(setTrades)
+  }, [instanceId])
+
+  const refreshChart = useCallback(() => {
     fetch(`/paper-trading/${instanceId}/chart`).then((r) => r.json()).then((data) => {
       setChartData(data)
       const syms = Object.keys(data.prices || {})
       setSymbolsList(syms)
       priceChartDataRef.current = { prices: data.prices || {}, trades: data.trades || [] }
     })
+  }, [instanceId])
+
+  function refreshAll() {
+    fetch(`/paper-trading/${instanceId}`).then((r) => r.json()).then(setInstance)
+    refreshPositionsAndTrades()
+    refreshChart()
   }
+
+  // WebSocket for real-time updates from ticker
+  usePaperTradingWS(instanceId, {
+    onInit: (inst) => setInstance(inst),
+    onTick: (payload) => {
+      if (payload.instance) setInstance(payload.instance)
+      if (payload.events && payload.events.length > 0) {
+        // A trade happened — refresh positions, trades, and chart
+        refreshPositionsAndTrades()
+        refreshChart()
+      }
+    },
+  })
 
   useEffect(() => {
     refreshAll()
-    const timer = setInterval(() => {
-      fetch(`/paper-trading/${instanceId}/tick`, { method: 'POST' })
-        .then((r) => r.json())
-        .then((res) => {
-          if (res && res.status !== 'Not running') refreshAll()
-        })
-        .catch(() => {})
-    }, 3000)
-    return () => clearInterval(timer)
   }, [instanceId])
 
   // equity curve chart

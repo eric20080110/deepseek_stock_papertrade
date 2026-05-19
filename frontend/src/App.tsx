@@ -3,6 +3,7 @@ import { Header } from './components/Layout/Header'
 import { Sidebar } from './components/Layout/Sidebar'
 import { MainContent } from './components/Layout/MainContent'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { ToastContainer } from './components/ToastContainer'
 import { useTaskStore } from './store/taskStore'
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
           <MainContent />
         </div>
       </div>
+      <ToastContainer />
     </ErrorBoundary>
   )
 }

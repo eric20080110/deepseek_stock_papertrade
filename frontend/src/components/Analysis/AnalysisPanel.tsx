@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { toast } from '../../lib/toast'
 import { useTaskStore } from '../../store/taskStore'
 import type { EvolutionTask } from '../../types/evolution'
 import { ParetoScatter3D } from './ParetoScatter3D'
@@ -34,7 +35,7 @@ export function AnalysisPanel() {
     try {
       const individuals = await fetch(`/tasks/${taskId}/individuals?pareto_rank=1&limit=100`).then((r) => r.json())
       if (!individuals.length) {
-        alert('此任務沒有帕雷托前緣個體，無法繼續演化')
+        toast.error('此任務沒有帕雷托前緣個體，無法繼續演化')
         return
       }
       individuals.sort((a: any, b: any) => (b.cagr || 0) - (a.cagr || 0))

@@ -57,8 +57,8 @@ export function TaskForm() {
     })
   }, [selectedStrategy])
 
-  const fetchEstimate = async () => {
-    if (!symbols.length || !startDate || !endDate) return
+  const handleOpenConfirm = async () => {
+    if (!valid) return
     setEstimating(true)
     try {
       const res = await fetch('/tasks/estimate', {
@@ -70,8 +70,11 @@ export function TaskForm() {
         }),
       })
       setEstimate(await res.json())
-    } catch { setEstimate(null) }
+    } catch {
+      setEstimate(null)
+    }
     setEstimating(false)
+    setShowConfirm(true)
   }
 
   const handleSubmit = async () => {
@@ -99,7 +102,6 @@ export function TaskForm() {
       const task = await res.json()
       addTask(task)
       setSeedParams(null)
-      setEstimate(null)
       setCurrentView('queue')
     } catch (e) {
       console.error(e)
@@ -112,7 +114,6 @@ export function TaskForm() {
     const d = TF_DEFAULTS[v] || TF_DEFAULTS['1h']
     setPopSize(d.pop)
     setMaxGens(d.gens)
-    setEstimate(null)
   }
 
   const valid = strategyId && symbols.length > 0 && startDate && endDate
@@ -151,12 +152,12 @@ export function TaskForm() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">起始日期 *</label>
-            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setEstimate(null) }}
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">結束日期 *</label>
-            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setEstimate(null) }}
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
@@ -174,7 +175,7 @@ export function TaskForm() {
             const today = new Date().toISOString().slice(0, 10)
             const active = startDate === start && endDate === today
             return (
-              <button key={label} onClick={() => { setStartDate(start); setEndDate(today); setEstimate(null) }}
+              <button key={label} onClick={() => { setStartDate(start); setEndDate(today) }}
                 className={`px-3 py-1.5 text-xs rounded-lg cursor-pointer transition-colors ${active ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}>
                 {label}
               </button>
@@ -197,12 +198,12 @@ export function TaskForm() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">族群大小</label>
-            <input type="number" min={10} max={2000} value={popSize} onChange={(e) => { setPopSize(+e.target.value); setEstimate(null) }}
+            <input type="number" min={10} max={2000} value={popSize} onChange={(e) => setPopSize(+e.target.value)}
               className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">總世代數</label>
-            <input type="number" min={5} max={500} value={maxGens} onChange={(e) => { setMaxGens(+e.target.value); setEstimate(null) }}
+            <input type="number" min={5} max={500} value={maxGens} onChange={(e) => setMaxGens(+e.target.value)}
               className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
@@ -231,28 +232,10 @@ export function TaskForm() {
       </div>
 
       {valid && !showConfirm && (
-        <div className="mt-6 space-y-3">
-          <button onClick={fetchEstimate} disabled={estimating}
-            className="w-full px-6 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 disabled:opacity-50 cursor-pointer text-sm">
-            {estimating ? '估算中...' : estimate ? '重新估算時間' : '預估執行時間'}
-          </button>
-          {estimate && (
-            <div className="p-3 bg-gray-50 border rounded-lg text-sm space-y-1">
-              <div className="flex justify-between">
-                <span className="text-gray-500">每代預估時間</span>
-                <span className="font-medium">{formatDuration(Math.round(estimate.time_per_gen_sec))}</span>
-              </div>
-              <div className="flex justify-between text-base font-bold">
-                <span className="text-gray-700">總預估時間</span>
-                <span className={estimate.estimated_seconds > 7200 ? 'text-amber-600' : 'text-emerald-600'}>
-                  {formatDuration(estimate.estimated_seconds)}
-                </span>
-              </div>
-            </div>
-          )}
-          <button onClick={() => setShowConfirm(true)}
-            className="w-full px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
-            建立任務
+        <div className="mt-6">
+          <button onClick={handleOpenConfirm} disabled={estimating}
+            className="w-full px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
+            {estimating ? '計算預估時間中...' : '建立任務'}
           </button>
         </div>
       )}
@@ -266,11 +249,24 @@ export function TaskForm() {
               <p>標的：{symbols.join(', ')}</p>
               <p>週期：{TF_LABELS[timeframe] || timeframe}</p>
               <p>族群：{popSize} ｜ 世代：{maxGens}</p>
-              {estimate && (
-                <p className="font-semibold text-base mt-2">
-                  預計耗時：{formatDuration(estimate.estimated_seconds)}
-                </p>
-              )}
+              <div className="mt-3 pt-3 border-t space-y-1">
+                {estimate ? (
+                  <>
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>每代預估</span>
+                      <span>{formatDuration(Math.round(estimate.time_per_gen_sec))}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold">
+                      <span>總預估時間</span>
+                      <span className={estimate.estimated_seconds > 7200 ? 'text-amber-600' : 'text-emerald-600'}>
+                        {formatDuration(estimate.estimated_seconds)}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-gray-400">預估時間不可用</p>
+                )}
+              </div>
             </div>
             <div className="flex gap-3">
               <button onClick={() => setShowConfirm(false)}

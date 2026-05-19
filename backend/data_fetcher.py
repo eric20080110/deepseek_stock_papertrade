@@ -10,7 +10,7 @@ BINANCE_BASE = "https://fapi.binance.com"
 
 
 class RateLimitManager:
-    def __init__(self, max_weight_10s: int = 50, max_weight_1m: int = 2400):
+    def __init__(self, max_weight_10s: int = 200, max_weight_1m: int = 2000):
         self._weight_10s: deque[tuple[float, int]] = deque()
         self._weight_1m: deque[tuple[float, int]] = deque()
         self._max_weight_10s = max_weight_10s
@@ -81,11 +81,10 @@ def _symbol_binance(symbol: str) -> str:
 
 
 def _get_weight(r: requests.Response) -> int:
-    h = r.headers.get("X-MBX-USED-WEIGHT-1m", "")
-    try:
-        return int(h)
-    except (ValueError, TypeError):
-        return 1
+    # Return fixed per-request weight for klines (limit=1500 costs ~10 on FAPI).
+    # X-MBX-USED-WEIGHT-1m is cumulative for the minute, NOT per-request cost —
+    # using it directly inflates the deque and causes excessive rate-limit sleeps.
+    return 10
 
 
 def _fetch_klines(
@@ -248,7 +247,11 @@ def fetch_ohlcv(
     if not pq_stale(symbol, timeframe, max_age):
         df = pq_get(symbol, timeframe, start_ts, end_ts)
         if df is not None:
-            return df
+            requested_span = end_ts - start_ts
+            actual_span = int(df.index[-1]) - int(df.index[0]) if len(df) > 1 else 0
+            if requested_span <= one_bar or actual_span >= requested_span * 0.8:
+                return df
+            # Parquet exists but doesn't cover requested range — fall through to re-fetch
 
     # 2. Try SQLite cache
     cached = _load_sqlite(symbol, timeframe, start_ts, end_ts)

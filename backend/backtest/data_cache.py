@@ -83,8 +83,14 @@ class DataCache:
                     lo, hi = self._ts(start_date), self._ts(end_date)
                     mask = (df.index >= lo) & (df.index <= hi)
                     if mask.any():
-                        return df.loc[mask]
-            if df is not None:
+                        sub = df.loc[mask]
+                        requested_span = hi - lo
+                        bar_s = self._bar_seconds(timeframe)
+                        actual_span = int(sub.index[-1]) - int(sub.index[0])
+                        if requested_span <= bar_s or actual_span >= requested_span * 0.8:
+                            return sub
+                        df = None  # insufficient coverage, fall through
+            elif df is not None:
                 return df
 
         if not timeframe:
@@ -97,11 +103,20 @@ class DataCache:
         if not force_refresh and not pq_stale_fn(symbol, timeframe, max_age):
             pq_df = pq_get(symbol, timeframe)
             if pq_df is not None:
-                self.store(symbol, pq_df, timeframe)
                 if start_date and end_date:
                     lo, hi = self._ts(start_date), self._ts(end_date)
-                    pq_df = pq_df[(pq_df.index >= lo) & (pq_df.index <= hi)]
-                return pq_df if not pq_df.empty else None
+                    filtered = pq_df[(pq_df.index >= lo) & (pq_df.index <= hi)]
+                    if not filtered.empty:
+                        requested_span = hi - lo
+                        bar_s = self._bar_seconds(timeframe)
+                        actual_span = int(filtered.index[-1]) - int(filtered.index[0])
+                        if requested_span <= bar_s or actual_span >= requested_span * 0.8:
+                            self.store(symbol, pq_df, timeframe)
+                            return filtered
+                        # Coverage insufficient — fall through to re-fetch
+                else:
+                    self.store(symbol, pq_df, timeframe)
+                    return pq_df if not pq_df.empty else None
 
         # 3. Fetch from remote (Binance or synthetic)
         from data_fetcher import fetch_ohlcv, force_refresh as _force_fetch

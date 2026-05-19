@@ -39,7 +39,8 @@ class PaperTicker:
         loop = asyncio.get_event_loop()
         while self._running:
             try:
-                instances = self._engine.list_instances()
+                # Run list_instances in thread pool so the event loop is never blocked
+                instances = await loop.run_in_executor(_TICKER_POOL, self._engine.list_instances)
                 intervals = []
                 tick_tasks = []
                 for inst in instances:

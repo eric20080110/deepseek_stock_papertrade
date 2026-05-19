@@ -1,5 +1,6 @@
 import json
-from fastapi import APIRouter, HTTPException
+import asyncio
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from typing import Optional
 
 from paper_trading.engine import PaperTradingEngine
@@ -8,6 +9,47 @@ from backtest.data_cache import DATA_CACHE
 
 router = APIRouter(prefix="/paper-trading", tags=["paper_trading"])
 engine = PaperTradingEngine()
+
+_event_loop: asyncio.AbstractEventLoop | None = None
+_ws_clients: dict[str, list[WebSocket]] = {}
+
+
+def set_event_loop(loop: asyncio.AbstractEventLoop):
+    global _event_loop
+    _event_loop = loop
+
+
+def _broadcast_tick(instance_id: str, result: dict):
+    """Called from engine tick (runs in thread pool) to push WS updates."""
+    if _event_loop is None:
+        return
+    clients = list(_ws_clients.get(instance_id, []))
+    if not clients:
+        return
+    inst = engine.get_instance(instance_id)
+    payload = {
+        "type": "TICK",
+        "total_equity": result.get("total_equity"),
+        "events": result.get("events", []),
+        "instance": inst.model_dump() if inst else {},
+    }
+
+    async def _send_all():
+        dead = []
+        for ws in clients:
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            pool = _ws_clients.get(instance_id, [])
+            if ws in pool:
+                pool.remove(ws)
+
+    asyncio.run_coroutine_threadsafe(_send_all(), _event_loop)
+
+
+engine.register_tick_callback(_broadcast_tick)
 
 
 @router.get("")
@@ -150,6 +192,23 @@ def tick_instance(instance_id: str):
             raise HTTPException(404, "Instance not found")
         return {"status": inst.status.value, "message": "Not running"}
     return result
+
+
+@router.websocket("/{instance_id}/stream")
+async def ws_instance_stream(websocket: WebSocket, instance_id: str):
+    await websocket.accept()
+    clients = _ws_clients.setdefault(instance_id, [])
+    clients.append(websocket)
+    try:
+        inst = engine.get_instance(instance_id)
+        if inst:
+            await websocket.send_json({"type": "INIT", "instance": inst.model_dump()})
+        while True:
+            await asyncio.sleep(30)
+            await websocket.send_json({"type": "ping"})
+    except (WebSocketDisconnect, Exception):
+        if websocket in clients:
+            clients.remove(websocket)
 
 
 @router.post("/webhook/binance")

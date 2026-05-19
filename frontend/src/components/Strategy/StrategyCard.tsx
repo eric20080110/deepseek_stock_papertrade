@@ -1,5 +1,6 @@
 import type { StrategyConfig } from '../../types/strategy'
 import { api } from '../../lib/api'
+import { toast } from '../../lib/toast'
 import { Lock, Pencil, Trash2, Copy, Eye } from 'lucide-react'
 
 interface Props {
@@ -21,7 +22,7 @@ export function StrategyCard({ strategy, onEdit, onRefresh, onUseStrategy, onCre
       await api.deleteStrategy(s.config_id)
       onRefresh()
     } catch (e: any) {
-      alert(e.message)
+      toast.error(e.message)
     }
   }
 
@@ -30,7 +31,7 @@ export function StrategyCard({ strategy, onEdit, onRefresh, onUseStrategy, onCre
       await api.duplicateStrategy(s.config_id)
       onRefresh()
     } catch (e: any) {
-      alert(e.message)
+      toast.error(e.message)
     }
   }
 

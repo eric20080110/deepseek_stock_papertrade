@@ -121,63 +121,98 @@ def get_individual(task_id: str, sid: str):
 @router.get("/individuals/{sid}/equity-curve")
 def individual_equity_curve(task_id: str, sid: str):
     from datetime import datetime
+    from backtest.engine import run_symbol_backtest
     conn = get_db()
     row = conn.execute(
-        "SELECT equity_curve_json, symbol_results_json FROM individuals WHERE task_id = ? AND strategy_id = ? ORDER BY generation DESC LIMIT 1",
+        "SELECT equity_curve_json, symbol_results_json, params_json FROM individuals"
+        " WHERE task_id = ? AND strategy_id = ? ORDER BY generation DESC LIMIT 1",
         (task_id, sid),
     ).fetchone()
     conn.close()
     if not row:
         raise HTTPException(404, "Equity curve not found")
-    result = {}
-    ts = []
-    if row["equity_curve_json"]:
-        raw = json.loads(row["equity_curve_json"])
-        if isinstance(raw, dict):
-            result["equity_curve"] = raw.get("v", [])
-            ts = raw.get("t", [])
-        else:
-            result["equity_curve"] = raw
-    if ts:
-        result["dates"] = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in ts]
-    else:
-        result["dates"] = []
-    if row["symbol_results_json"]:
-        sym_data = json.loads(row["symbol_results_json"])
-        result["symbol_curves"] = {
-            sym: info.get("equity_curve", [])
-            for sym, info in sym_data.items()
-        }
-        result["symbol_trades"] = {
-            sym: [
-                {"entry_bar": t["entry_bar"], "exit_bar": t["exit_bar"],
-                 "entry_price": t["entry_price"], "exit_price": t["exit_price"],
-                 "direction": t["direction"], "pnl": t["pnl"]}
-                for t in info.get("trades", [])
-            ]
-            for sym, info in sym_data.items()
-        }
-        symbols = list(sym_data.keys())
-        config = _task_config(task_id)
-        sd = config.start_date if config else ""
-        ed = config.end_date if config else ""
-        tf = config.timeframe if config else "1d"
-        prices_dates = {sym: _ohlcv_prices(sym, sd, ed, tf) for sym in symbols}
-        result["symbol_prices"] = {sym: pd[0] for sym, pd in prices_dates.items()}
-        result["dates"] = result["dates"] or next((pd[1] for pd in prices_dates.values() if pd[1]), [])
-        dca_by_sym = {}
-        for sym in symbols:
-            curve = _dca_curve(sym, sd, ed, tf)
-            dca_by_sym[sym] = curve
-        result["dca_curves"] = dca_by_sym
-        if dca_by_sym:
-            min_len = min(len(c) for c in dca_by_sym.values())
-            result["dca_combined"] = [
-                round(float(np.mean([dca_by_sym[s][i] for s in symbols])), 2)
-                for i in range(min_len)
-            ]
+
+    config = _task_config(task_id)
+    params = json.loads(row["params_json"]) if row["params_json"] else None
+
+    result: dict = {}
+
+    # Re-run backtest on full date range so curve covers start_date→end_date (not just IS 70%)
+    if config and params:
+        conn2 = get_db()
+        cfg_row = conn2.execute(
+            "SELECT template_id, config_id FROM strategy_configs WHERE config_id = ?",
+            (config.strategy_config_id,),
+        ).fetchone()
+        conn2.close()
+        strategy_id = (cfg_row["template_id"] or cfg_row["config_id"]) if cfg_row else config.strategy_config_id
+
+        full_results = []
+        for sym in config.symbols:
+            df = DATA_CACHE.ensure(sym, start_date=config.start_date, end_date=config.end_date, timeframe=config.timeframe)
+            if df is None or df.empty:
+                continue
+            sr = run_symbol_backtest(symbol=sym, data=df, params=params, strategy_id=strategy_id, initial_capital=10000.0)
+            if sr:
+                full_results.append(sr)
+
+        if full_results:
+            min_len = min(len(sr.equity_curve) for sr in full_results)
+            result["equity_curve"] = [round(float(np.mean([sr.equity_curve[i] for sr in full_results])), 2) for i in range(min_len)]
+            ts_full = full_results[0].equity_timestamps or []
+            result["dates"] = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in ts_full[:min_len]] if ts_full else []
+            result["symbol_curves"] = {sr.symbol: sr.equity_curve for sr in full_results}
+            result["symbol_trades"] = {
+                sr.symbol: [
+                    {"entry_bar": t.entry_bar, "exit_bar": t.exit_bar,
+                     "entry_price": t.entry_price, "exit_price": t.exit_price,
+                     "direction": t.direction, "pnl": t.pnl}
+                    for t in sr.trades
+                ]
+                for sr in full_results
+            }
+
+    # Fallback: use stored IS equity curve
+    if "equity_curve" not in result:
+        ts = []
+        if row["equity_curve_json"]:
+            raw = json.loads(row["equity_curve_json"])
+            if isinstance(raw, dict):
+                result["equity_curve"] = raw.get("v", [])
+                ts = raw.get("t", [])
+            else:
+                result["equity_curve"] = raw
+        result["dates"] = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in ts] if ts else []
+        if row["symbol_results_json"]:
+            sym_data = json.loads(row["symbol_results_json"])
+            result.setdefault("symbol_curves", {sym: info.get("equity_curve", []) for sym, info in sym_data.items()})
+            result.setdefault("symbol_trades", {
+                sym: [
+                    {"entry_bar": t["entry_bar"], "exit_bar": t["exit_bar"],
+                     "entry_price": t["entry_price"], "exit_price": t["exit_price"],
+                     "direction": t["direction"], "pnl": t["pnl"]}
+                    for t in info.get("trades", [])
+                ]
+                for sym, info in sym_data.items()
+            })
+
     if "equity_curve" not in result:
         raise HTTPException(404, "Equity curve not found")
+
+    # Symbol price overlays (full range) and DCA benchmark
+    sd = config.start_date if config else ""
+    ed = config.end_date if config else ""
+    tf = config.timeframe if config else "1d"
+    symbols = list(result.get("symbol_curves", {}).keys()) or (config.symbols if config else [])
+    prices_dates = {sym: _ohlcv_prices(sym, sd, ed, tf) for sym in symbols}
+    result["symbol_prices"] = {sym: pd[0] for sym, pd in prices_dates.items()}
+    if not result.get("dates"):
+        result["dates"] = next((pd[1] for pd in prices_dates.values() if pd[1]), [])
+    dca_by_sym = {sym: _dca_curve(sym, sd, ed, tf) for sym in symbols}
+    result["dca_curves"] = dca_by_sym
+    if dca_by_sym:
+        min_len = min(len(c) for c in dca_by_sym.values())
+        result["dca_combined"] = [round(float(np.mean([dca_by_sym[s][i] for s in symbols])), 2) for i in range(min_len)]
     return result
 
 

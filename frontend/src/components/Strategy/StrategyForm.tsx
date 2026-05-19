@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
+import { toast } from '../../lib/toast'
 import type { ParamDef, ConstraintDef } from '../../types/strategy'
 import { BasicInfoStep } from './BasicInfoStep'
 import { ParamSpaceEditor } from './ParamSpaceEditor'
@@ -100,7 +101,7 @@ export function StrategyForm({ templateId, configId, onSave, onCancel }: Props) 
       }
       onSave()
     } catch (e: any) {
-      alert(e.message)
+      toast.error(e.message)
     }
     setSaving(false)
   }

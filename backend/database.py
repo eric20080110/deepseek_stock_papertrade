@@ -4,6 +4,23 @@ import sqlite3
 import urllib.request
 import urllib.error
 
+# Load .env from backend dir or repo root (dev convenience)
+def _load_dotenv():
+    for _p in (
+        os.path.join(os.path.dirname(__file__), ".env"),
+        os.path.join(os.path.dirname(__file__), "..", ".env"),
+    ):
+        if os.path.exists(_p):
+            with open(_p) as _f:
+                for _line in _f:
+                    _line = _line.strip()
+                    if _line and not _line.startswith("#") and "=" in _line:
+                        _k, _, _v = _line.partition("=")
+                        os.environ.setdefault(_k.strip(), _v.strip())
+            break
+
+_load_dotenv()
+
 LOCAL_DB_PATH = os.path.join(os.path.dirname(__file__), "quantgene_local.db")
 
 TURSO_URL = os.environ.get("TURSO_URL")
@@ -158,11 +175,46 @@ class _TursoConnection:
         pass
 
 
-def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(LOCAL_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+import threading as _threading
+
+_db_local = _threading.local()
+
+
+class _PooledConn:
+    """Wraps a thread-local SQLite connection; close() is a no-op so the connection is reused."""
+    def __init__(self, raw: sqlite3.Connection):
+        self._c = raw
+
+    def execute(self, sql, params=None):
+        if params is not None:
+            return self._c.execute(sql, params)
+        return self._c.execute(sql)
+
+    def executemany(self, sql, params_list):
+        return self._c.executemany(sql, params_list)
+
+    def executescript(self, sql):
+        return self._c.executescript(sql)
+
+    def commit(self):
+        return self._c.commit()
+
+    def close(self):
+        pass  # reuse across calls on the same thread
+
+
+def get_db() -> "_PooledConn":
+    conn = getattr(_db_local, "conn", None)
+    if conn is None:
+        raw = sqlite3.connect(LOCAL_DB_PATH, check_same_thread=False)
+        raw.row_factory = sqlite3.Row
+        raw.execute("PRAGMA journal_mode=WAL")
+        raw.execute("PRAGMA synchronous=NORMAL")
+        raw.execute("PRAGMA busy_timeout=5000")
+        raw.execute("PRAGMA foreign_keys=ON")
+        raw.commit()
+        conn = _PooledConn(raw)
+        _db_local.conn = conn
     return conn
 
 
