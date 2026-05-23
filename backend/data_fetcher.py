@@ -169,9 +169,16 @@ def _fetch_yfinance(symbol: str, timeframe: str, start_ms: int, end_ms: int) -> 
                           interval=interval, progress=False, auto_adjust=True)
         if raw is None or raw.empty:
             return None
+        # Flatten MultiIndex columns from newer yfinance versions
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = raw.columns.get_level_values(0)
         df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
         df.columns = ["open", "high", "low", "close", "volume"]
-        df.index = (pd.to_datetime(df.index).astype("int64") // 10**9)
+        # Convert timezone-aware DatetimeIndex to unix seconds
+        idx = pd.to_datetime(df.index)
+        if idx.tzinfo is None:
+            idx = idx.tz_localize("UTC")
+        df.index = idx.astype("int64") // 10**9
         df.index.name = "timestamp"
         return df.dropna()
     except Exception:
