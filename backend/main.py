@@ -59,6 +59,21 @@ def health():
     return {"status": "ok"}
 
 
+@app.post("/system/vacuum")
+def vacuum_db():
+    """Reclaim free space after deleting tasks. Requires no other connections on the DB."""
+    import sqlite3 as _sq
+    from database import LOCAL_DB_PATH
+    try:
+        c = _sq.connect(LOCAL_DB_PATH, timeout=5)
+        c.execute("VACUUM")
+        c.close()
+        return {"detail": "VACUUM completed"}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(503, f"VACUUM failed (close DBeaver first): {e}")
+
+
 @app.get("/system/db-status")
 def db_status():
     import os, time
