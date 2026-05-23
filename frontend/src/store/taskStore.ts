@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { EvolutionTask, GenerationResult, ViewType } from '../types/evolution'
+import type { EvolutionTask, GenerationResult, ViewType, TaskConfig } from '../types/evolution'
 
 interface IndividualProgress {
   generation: number
@@ -11,6 +11,7 @@ interface TaskState {
   tasks: EvolutionTask[]
   activeTaskId: string | null
   dbStatusVersion: number
+  retryConfig: TaskConfig | null
   selectedAnalysisTaskId: string | null
   currentView: ViewType
   generationHistory: GenerationResult[]
@@ -36,12 +37,14 @@ interface TaskState {
   clearGenerationHistory: () => void
   setIndividualProgress: (progress: IndividualProgress | null) => void
   triggerDbStatusRefresh: () => void
+  setRetryConfig: (config: TaskConfig | null) => void
 }
 
 export const useTaskStore = create<TaskState>((set) => ({
   tasks: [],
   activeTaskId: null,
   dbStatusVersion: 0,
+  retryConfig: null,
   selectedAnalysisTaskId: null,
   currentView: 'queue',
   generationHistory: [],
@@ -75,4 +78,5 @@ export const useTaskStore = create<TaskState>((set) => ({
   clearGenerationHistory: () => set({ generationHistory: [], individualProgress: null }),
   setIndividualProgress: (progress) => set({ individualProgress: progress }),
   triggerDbStatusRefresh: () => set((s) => ({ dbStatusVersion: s.dbStatusVersion + 1 })),
+  setRetryConfig: (config) => set({ retryConfig: config }),
 }))

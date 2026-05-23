@@ -23,6 +23,7 @@ export function EquityCurve({ taskId }: Props) {
   const [sid, setSid] = useState<string | null>(null)
   const [individuals, setIndividuals] = useState<any[]>([])
   const [symbolsList, setSymbolsList] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     fetch(`/tasks/${taskId}/individuals?pareto_rank=1&limit=50`)
@@ -141,9 +142,11 @@ export function EquityCurve({ taskId }: Props) {
       Plotly.react(el, traces, layoutRef.current || {})
     }
 
+    setLoading(true)
     fetch(`/tasks/${taskId}/individuals/${sid}/equity-curve?max_points=500`)
       .then((r) => r.json())
-      .then((data) => { if (!cancelled) renderFull(data) })
+      .then((data) => { if (!cancelled) { setLoading(false); renderFull(data) } })
+      .catch(() => { if (!cancelled) setLoading(false) })
 
     return () => {
       cancelled = true
@@ -212,6 +215,11 @@ export function EquityCurve({ taskId }: Props) {
           ))}
         </select>
       </div>
+      {loading && (
+        <div className="w-full h-[300px] rounded-lg bg-gray-100 animate-pulse flex items-center justify-center text-gray-400 text-sm">
+          載入資金曲線中...
+        </div>
+      )}
       <div ref={chartRef} className="w-full" />
       <div className="mt-2 space-y-3">
         {symbolsList.map((sym) => (

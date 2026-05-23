@@ -14,7 +14,7 @@ export function ParetoScatter3D({ taskId }: Props) {
     const Plotly = (window as any).Plotly
     if (!Plotly) return
 
-    fetch(`/tasks/${taskId}/charts/pareto-scatter`)
+    fetch(`/tasks/${taskId}/charts/pareto-scatter?last_only=true`)
       .then((r) => r.json())
       .then((all: any[]) => {
         if (all.length === 0) return

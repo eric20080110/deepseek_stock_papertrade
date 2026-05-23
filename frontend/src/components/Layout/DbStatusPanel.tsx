@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Database, ChevronDown, ChevronUp } from 'lucide-react'
+import { Database, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
+import { toast } from '../../lib/toast'
 import { useTaskStore } from '../../store/taskStore'
 
 interface DbStatus {
@@ -29,6 +30,24 @@ const ROW_LABELS: Record<string, string> = {
 export function DbStatusPanel() {
   const [status, setStatus] = useState<DbStatus | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [vacuuming, setVacuuming] = useState(false)
+
+  const handleVacuum = async () => {
+    setVacuuming(true)
+    try {
+      const res = await fetch('/system/vacuum', { method: 'POST' })
+      if (!res.ok) {
+        const d = await res.json()
+        toast.error(d.detail || 'VACUUM 失敗，請先關閉 DBeaver')
+      } else {
+        toast.success('VACUUM 完成，空間已回收')
+        fetch('/system/db-status').then((r) => r.json()).then(setStatus).catch(() => {})
+      }
+    } catch {
+      toast.error('VACUUM 請求失敗')
+    }
+    setVacuuming(false)
+  }
   const dbStatusVersion = useTaskStore((s) => s.dbStatusVersion)
 
   useEffect(() => {
@@ -98,6 +117,15 @@ export function DbStatusPanel() {
           <span className="text-gray-400">{tursoLabel}</span>
         </div>
       </div>
+
+      {/* VACUUM button */}
+      {expanded && (
+        <button onClick={handleVacuum} disabled={vacuuming}
+          className="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50 cursor-pointer text-gray-500">
+          <Trash2 className="w-3 h-3" />
+          {vacuuming ? '回收中...' : '回收空間 (VACUUM)'}
+        </button>
+      )}
 
       {/* Expanded detail */}
       {expanded && (

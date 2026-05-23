@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTaskStore } from '../../store/taskStore'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { StatCards } from './StatCards'
@@ -14,9 +14,11 @@ export function MonitorPanel() {
   const setActiveTaskId = useTaskStore((s) => s.setActiveTaskId)
   const latest = generationHistory.length > 0 ? generationHistory[generationHistory.length - 1] : null
   const individualProgress = useTaskStore((s) => s.individualProgress)
+  const lastTaskIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (activeTask) {
+    if (activeTask && activeTask.task_id !== lastTaskIdRef.current) {
+      lastTaskIdRef.current = activeTask.task_id
       setActiveTaskId(activeTask.task_id)
       clearGenerationHistory()
     }

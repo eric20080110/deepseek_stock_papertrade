@@ -19,15 +19,12 @@ export function AnalysisPanel() {
   const [tab, setTab] = useState<Tab>('scatter')
   const [evolving, setEvolving] = useState(false)
 
+  const storeTasks = useTaskStore((s) => s.tasks)
   useEffect(() => {
-    fetch('/tasks')
-      .then((r) => r.json())
-      .then((data: EvolutionTask[]) => {
-        const completed = data.filter((t) => t.status === 'COMPLETED')
-        setTasks(completed)
-        if (!taskId && completed.length > 0) setTaskId(completed[0].task_id)
-      })
-  }, [])
+    const completed = storeTasks.filter((t) => t.status === 'COMPLETED')
+    setTasks(completed)
+    if (!taskId && completed.length > 0) setTaskId(completed[0].task_id)
+  }, [storeTasks])
 
   const handleQuickEvolve = async () => {
     if (!taskId || evolving) return
@@ -74,13 +71,13 @@ export function AnalysisPanel() {
         <h1 className="text-2xl font-bold">結果分析</h1>
         <div className="flex items-center gap-2">
           <select
-            className="px-3 py-1.5 border rounded-lg text-sm outline-none"
+            className="px-3 py-1.5 border rounded-lg text-sm outline-none max-w-xs"
             value={taskId || ''}
             onChange={(e) => setTaskId(e.target.value || null)}
           >
             {tasks.map((t) => (
               <option key={t.task_id} value={t.task_id}>
-                {t.task_id.slice(0, 10)}...{t.config.symbols.slice(0, 2).join('/')}
+                {t.name || t.task_id.slice(0, 8)} — {t.config.symbols.slice(0, 3).join('/')} {t.config.timeframe}
               </option>
             ))}
           </select>

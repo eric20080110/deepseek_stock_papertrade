@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { useTaskStore } from '../store/taskStore'
+import { toast } from '../lib/toast'
 
 export function useWebSocket(taskId: string | null) {
   const wsRef = useRef<WebSocket | null>(null)
   const retryCount = useRef(0)
   const doneRef = useRef(false)
   const maxRetries = 5
-  const { addGeneration, setWsStatus, updateTask, setActiveTaskId, setIndividualProgress } = useTaskStore()
+  const { addGeneration, setWsStatus, updateTask, setActiveTaskId, setIndividualProgress,
+    setSelectedAnalysisTaskId, setCurrentView } = useTaskStore()
 
   useEffect(() => {
     if (!taskId) return
@@ -37,11 +39,22 @@ export function useWebSocket(taskId: string | null) {
             setActiveTaskId(null)
             doneRef.current = true
             ws.close()
+            toast.success('演化任務完成！', {
+              duration: 8000,
+              action: {
+                label: '查看結果 →',
+                onClick: () => {
+                  setSelectedAnalysisTaskId(taskId)
+                  setCurrentView('analysis')
+                },
+              },
+            })
           } else if (msg.type === 'TASK_FAILED') {
             updateTask(taskId, { status: 'FAILED', error_message: msg.error })
             setActiveTaskId(null)
             doneRef.current = true
             ws.close()
+            toast.error('任務執行失敗', { duration: 6000 })
           } else if (msg.type === 'TASK_CANCELLED') {
             updateTask(taskId, { status: 'CANCELLED' })
             setActiveTaskId(null)
@@ -58,7 +71,8 @@ export function useWebSocket(taskId: string | null) {
           retryCount.current++
           setTimeout(connect, delay)
         } else {
-          setWsStatus('disconnected')
+          // idle = task finished normally; disconnected = gave up retrying after error
+          setWsStatus(doneRef.current ? 'idle' : 'disconnected')
         }
       }
 

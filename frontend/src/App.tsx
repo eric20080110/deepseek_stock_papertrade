@@ -11,10 +11,22 @@ function App() {
   const setApiStatus = useTaskStore((s) => s.setApiStatus)
 
   useEffect(() => {
+    const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
     const poll = () => {
       fetch('/tasks')
         .then((r) => { if (!r.ok) throw new Error(); return r.json() })
-        .then((data) => { setTasks(data); setApiStatus('ok') })
+        .then((data) => {
+          // Never let a stale RUNNING overwrite a terminal status the WS already set
+          const current = useTaskStore.getState().tasks
+          const terminalById = new Map(
+            current.filter((t) => TERMINAL.has(t.status)).map((t) => [t.task_id, t])
+          )
+          const merged = (data as any[]).map((t) =>
+            TERMINAL.has(t.status) || !terminalById.has(t.task_id) ? t : terminalById.get(t.task_id)!
+          )
+          setTasks(merged)
+          setApiStatus('ok')
+        })
         .catch(() => setApiStatus('error'))
     }
     poll()

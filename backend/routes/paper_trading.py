@@ -52,6 +52,24 @@ def _broadcast_tick(instance_id: str, result: dict):
 engine.register_tick_callback(_broadcast_tick)
 
 
+@router.get("/render-status")
+def render_status():
+    import os, urllib.request, urllib.error
+    url = os.environ.get("RENDER_PAPER_URL", "").rstrip("/")
+    if not url:
+        return {"connected": False, "reason": "not_configured"}
+    try:
+        with urllib.request.urlopen(f"{url}/health", timeout=8) as r:
+            import json as _json
+            data = _json.loads(r.read())
+            return {"connected": True, "url": url, "instances": data.get("instances", 0)}
+    except urllib.error.HTTPError as e:
+        reason = "not_deployed" if e.code == 404 else f"http_{e.code}"
+        return {"connected": False, "url": url, "reason": reason}
+    except Exception as e:
+        return {"connected": False, "url": url, "reason": "unreachable"}
+
+
 @router.get("")
 def list_instances():
     return engine.list_instances()

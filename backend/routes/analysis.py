@@ -134,9 +134,16 @@ def get_individual(task_id: str, sid: str):
 
 
 @router.get("/individuals/{sid}/equity-curve")
-def individual_equity_curve(task_id: str, sid: str):
+def individual_equity_curve(
+    task_id: str,
+    sid: str,
+    max_points: int = Query(500),
+    start_ts: Optional[int] = Query(None),
+    end_ts: Optional[int] = Query(None),
+):
     from datetime import datetime
     from backtest.engine import run_symbol_backtest
+    is_range_query = start_ts is not None and end_ts is not None
     conn = get_db()
     row = conn.execute(
         "SELECT equity_curve_json, symbol_results_json, params_json FROM individuals"
@@ -152,11 +159,11 @@ def individual_equity_curve(task_id: str, sid: str):
 
     result: dict = {}
 
-    # Re-run backtest on full date range to cover IS+OOS, but skip for large datasets
-    # (1m/5m with long date ranges produce 500k+ bars — too slow to re-run)
+    # Estimate bar count to decide whether re-run and price overlays are feasible
     _RERUN_BAR_LIMIT = 10000
-    should_rerun = False
-    if config and params:
+    _OVERLAY_BAR_LIMIT = 20000
+    est_bars = 0
+    if config:
         tf = config.timeframe or "1d"
         bar_secs = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
         from datetime import datetime as _dt
@@ -166,7 +173,9 @@ def individual_equity_curve(task_id: str, sid: str):
             est_bars = (ed_ts - sd_ts) // bar_secs.get(tf, 86400)
         except Exception:
             est_bars = 0
-        should_rerun = est_bars <= _RERUN_BAR_LIMIT
+
+    should_rerun = not is_range_query and config and params and est_bars <= _RERUN_BAR_LIMIT
+    skip_overlay = is_range_query or est_bars > _OVERLAY_BAR_LIMIT
 
     if should_rerun:
         conn2 = get_db()
@@ -189,11 +198,12 @@ def individual_equity_curve(task_id: str, sid: str):
         if full_results:
             min_len = min(len(sr.equity_curve) for sr in full_results)
             raw_curve = [round(float(np.mean([sr.equity_curve[i] for sr in full_results])), 2) for i in range(min_len)]
-            result["equity_curve"] = _downsample(raw_curve)
+            result["equity_curve"] = _downsample(raw_curve, max_points)
             ts_full = full_results[0].equity_timestamps or []
-            ds_idx = [int(i * min_len / len(result["equity_curve"])) for i in range(len(result["equity_curve"]))] if ts_full else []
+            n_ds = len(result["equity_curve"])
+            ds_idx = [int(i * min_len / n_ds) for i in range(n_ds)] if ts_full else []
             result["dates"] = [datetime.utcfromtimestamp(ts_full[i]).strftime("%Y-%m-%d %H:%M") for i in ds_idx] if ts_full else []
-            result["symbol_curves"] = {sr.symbol: _downsample(sr.equity_curve) for sr in full_results}
+            result["symbol_curves"] = {sr.symbol: _downsample(sr.equity_curve, max_points) for sr in full_results}
             result["symbol_trades"] = {
                 sr.symbol: [
                     {"entry_bar": t.entry_bar, "exit_bar": t.exit_bar,
@@ -204,7 +214,7 @@ def individual_equity_curve(task_id: str, sid: str):
                 for sr in full_results
             }
 
-    # Fallback: use stored IS equity curve (downsampled)
+    # Fallback: use stored IS equity curve
     if "equity_curve" not in result:
         ts = []
         if row["equity_curve_json"]:
@@ -215,17 +225,27 @@ def individual_equity_curve(task_id: str, sid: str):
             else:
                 raw_curve = raw
                 ts = []
-            result["equity_curve"] = _downsample(raw_curve)
-            # Align timestamps to downsampled indices
-            if ts:
-                step = len(raw_curve) / len(result["equity_curve"]) if result["equity_curve"] else 1
-                ds_ts = [ts[min(int(i * step), len(ts) - 1)] for i in range(len(result["equity_curve"]))]
+
+            # Filter by time range when zoom query
+            if is_range_query and ts:
+                pairs = [(v, t) for v, t in zip(raw_curve, ts) if start_ts <= t <= end_ts]
+                if pairs:
+                    raw_curve = [p[0] for p in pairs]
+                    ts = [p[1] for p in pairs]
+
+            result["equity_curve"] = _downsample(raw_curve, max_points)
+            if ts and result["equity_curve"]:
+                n_raw = len(raw_curve)
+                n_ds = len(result["equity_curve"])
+                step = n_raw / n_ds if n_ds else 1
+                ds_ts = [ts[min(int(i * step), n_raw - 1)] for i in range(n_ds)]
                 result["dates"] = [datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M") for t in ds_ts]
             else:
                 result["dates"] = []
-        if row["symbol_results_json"]:
+
+        if not skip_overlay and row["symbol_results_json"]:
             sym_data = json.loads(row["symbol_results_json"])
-            result.setdefault("symbol_curves", {sym: _downsample(info.get("equity_curve", [])) for sym, info in sym_data.items()})
+            result.setdefault("symbol_curves", {sym: _downsample(info.get("equity_curve", []), max_points) for sym, info in sym_data.items()})
             result.setdefault("symbol_trades", {
                 sym: [
                     {"entry_bar": t["entry_bar"], "exit_bar": t["exit_bar"],
@@ -239,20 +259,21 @@ def individual_equity_curve(task_id: str, sid: str):
     if "equity_curve" not in result:
         raise HTTPException(404, "Equity curve not found")
 
-    # Symbol price overlays (full range) and DCA benchmark
-    sd = config.start_date if config else ""
-    ed = config.end_date if config else ""
-    tf = config.timeframe if config else "1d"
-    symbols = list(result.get("symbol_curves", {}).keys()) or (config.symbols if config else [])
-    prices_dates = {sym: _ohlcv_prices(sym, sd, ed, tf) for sym in symbols}
-    result["symbol_prices"] = {sym: pd[0] for sym, pd in prices_dates.items()}
-    if not result.get("dates"):
-        result["dates"] = next((pd[1] for pd in prices_dates.values() if pd[1]), [])
-    dca_by_sym = {sym: _dca_curve(sym, sd, ed, tf) for sym in symbols}
-    result["dca_curves"] = dca_by_sym
-    if dca_by_sym:
-        min_len = min(len(c) for c in dca_by_sym.values())
-        result["dca_combined"] = [round(float(np.mean([dca_by_sym[s][i] for s in symbols])), 2) for i in range(min_len)]
+    # Symbol price overlays and DCA benchmark — skip for range queries and large datasets
+    if not skip_overlay:
+        sd = config.start_date if config else ""
+        ed = config.end_date if config else ""
+        tf = config.timeframe if config else "1d"
+        symbols = list(result.get("symbol_curves", {}).keys()) or (config.symbols if config else [])
+        prices_dates = {sym: _ohlcv_prices(sym, sd, ed, tf) for sym in symbols}
+        result["symbol_prices"] = {sym: pd[0] for sym, pd in prices_dates.items()}
+        if not result.get("dates"):
+            result["dates"] = next((pd[1] for pd in prices_dates.values() if pd[1]), [])
+        dca_by_sym = {sym: _dca_curve(sym, sd, ed, tf) for sym in symbols}
+        result["dca_curves"] = dca_by_sym
+        if dca_by_sym:
+            min_len = min(len(c) for c in dca_by_sym.values())
+            result["dca_combined"] = [round(float(np.mean([dca_by_sym[s][i] for s in symbols])), 2) for i in range(min_len)]
     return result
 
 

@@ -1,9 +1,16 @@
 export type ToastType = 'success' | 'error' | 'info'
 
+export interface ToastAction {
+  label: string
+  onClick: () => void
+}
+
 export interface ToastItem {
   id: number
   type: ToastType
   message: string
+  action?: ToastAction
+  duration?: number
 }
 
 type Listener = (toast: ToastItem) => void
@@ -16,14 +23,14 @@ export const toastBus = {
     _listeners.add(fn)
     return () => { _listeners.delete(fn) }
   },
-  emit(type: ToastType, message: string) {
-    const t: ToastItem = { id: ++_id, type, message }
+  emit(type: ToastType, message: string, opts?: { action?: ToastAction; duration?: number }) {
+    const t: ToastItem = { id: ++_id, type, message, ...opts }
     _listeners.forEach((fn) => fn(t))
   },
 }
 
 export const toast = {
-  success: (msg: string) => toastBus.emit('success', msg),
-  error: (msg: string) => toastBus.emit('error', msg),
-  info: (msg: string) => toastBus.emit('info', msg),
+  success: (msg: string, opts?: { action?: ToastAction; duration?: number }) => toastBus.emit('success', msg, opts),
+  error: (msg: string, opts?: { action?: ToastAction; duration?: number }) => toastBus.emit('error', msg, opts),
+  info: (msg: string, opts?: { action?: ToastAction; duration?: number }) => toastBus.emit('info', msg, opts),
 }

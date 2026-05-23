@@ -45,17 +45,28 @@ export function TaskForm() {
   const setSelectedStrategy = useTaskStore((s) => s.setSelectedStrategy)
   const seedParams = useTaskStore((s) => s.seedParams)
   const setSeedParams = useTaskStore((s) => s.setSeedParams)
+  const retryConfig = useTaskStore((s) => s.retryConfig)
+  const setRetryConfig = useTaskStore((s) => s.setRetryConfig)
 
   useEffect(() => {
     api.listStrategies().then((s) => {
       const userStrategies = s.filter((x) => !x.is_template)
       setStrategies(userStrategies)
-      if (selectedStrategy) {
+      if (retryConfig) {
+        setStrategyId(retryConfig.strategy_config_id)
+        setSymbols(retryConfig.symbols)
+        setStartDate(retryConfig.start_date)
+        setEndDate(retryConfig.end_date)
+        setTimeframe(retryConfig.timeframe || '1d')
+        if (retryConfig.population_size) setPopSize(retryConfig.population_size)
+        if (retryConfig.max_generations) setMaxGens(retryConfig.max_generations)
+        setRetryConfig(null)
+      } else if (selectedStrategy) {
         setStrategyId(selectedStrategy)
         setSelectedStrategy(null)
       }
     })
-  }, [selectedStrategy])
+  }, [])
 
   const handleOpenConfirm = async () => {
     if (!valid) return
