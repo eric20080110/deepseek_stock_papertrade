@@ -237,6 +237,17 @@ def get_db() -> "_PooledConn":
     return conn
 
 
+def release_db():
+    """Close and remove the thread-local DB connection. Call after long-running background work."""
+    conn = getattr(_db_local, "conn", None)
+    if conn is not None:
+        try:
+            conn._c.close()
+        except Exception:
+            pass
+        _db_local.conn = None
+
+
 def get_turso() -> _TursoConnection:
     global _turso_instance
     if _turso_instance is None:

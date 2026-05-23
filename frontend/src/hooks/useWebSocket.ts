@@ -4,11 +4,14 @@ import { useTaskStore } from '../store/taskStore'
 export function useWebSocket(taskId: string | null) {
   const wsRef = useRef<WebSocket | null>(null)
   const retryCount = useRef(0)
+  const doneRef = useRef(false)
   const maxRetries = 5
   const { addGeneration, setWsStatus, updateTask, setActiveTaskId, setIndividualProgress } = useTaskStore()
 
   useEffect(() => {
     if (!taskId) return
+    doneRef.current = false
+    retryCount.current = 0
 
     const connect = () => {
       setWsStatus('connecting')
@@ -32,21 +35,24 @@ export function useWebSocket(taskId: string | null) {
           } else if (msg.type === 'TASK_COMPLETED') {
             updateTask(taskId, { status: 'COMPLETED', progress_pct: 100 })
             setActiveTaskId(null)
+            doneRef.current = true
             ws.close()
           } else if (msg.type === 'TASK_FAILED') {
             updateTask(taskId, { status: 'FAILED', error_message: msg.error })
             setActiveTaskId(null)
+            doneRef.current = true
             ws.close()
           } else if (msg.type === 'TASK_CANCELLED') {
             updateTask(taskId, { status: 'CANCELLED' })
             setActiveTaskId(null)
+            doneRef.current = true
             ws.close()
           }
         } catch {}
       }
 
       ws.onclose = () => {
-        if (retryCount.current < maxRetries) {
+        if (!doneRef.current && retryCount.current < maxRetries) {
           setWsStatus('reconnecting')
           const delay = Math.min(1000 * Math.pow(2, retryCount.current), 16000)
           retryCount.current++
@@ -61,6 +67,7 @@ export function useWebSocket(taskId: string | null) {
 
     connect()
     return () => {
+      doneRef.current = true
       wsRef.current?.close()
       wsRef.current = null
     }

@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from database import sync_task_to_turso, get_db, get_turso
+from database import sync_task_to_turso, get_db, get_turso, release_db
 from evolution.task_manager import TaskManager
 from evolution.engine import EvolutionEngine
 from evolution.models import TaskConfig, TaskStatus
@@ -66,6 +66,8 @@ def _run_task_background(task_id: str):
     except Exception as e:
         task_manager.fail_task(task_id, str(e))
         _notify_clients(task_id, {"type": "TASK_FAILED", "task_id": task_id, "error": str(e)})
+    finally:
+        release_db()  # Release thread-local SQLite connection so WAL can checkpoint
 
 
 class CreateTaskRequest(BaseModel):
