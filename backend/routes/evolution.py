@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from database import sync_task_to_turso, get_db, get_turso, release_db
+from database import sync_task_to_turso, get_db, get_turso, release_db, checkpoint_db
 from evolution.task_manager import TaskManager
 from evolution.engine import EvolutionEngine
 from evolution.models import TaskConfig, TaskStatus
@@ -48,6 +48,7 @@ def _broadcast_generation(gen_result, task_id: str):
 
 def _run_task_background(task_id: str):
     task_manager.update_task(task_id, status="RUNNING", started_at=int(time.time()))
+    completed_msg = None
     try:
         def progress(gen, current, total):
             _notify_clients(task_id, {
@@ -62,12 +63,15 @@ def _run_task_background(task_id: str):
             on_progress=progress,
         )
         sync_task_to_turso(task_id)
-        _notify_clients(task_id, {"type": "TASK_COMPLETED", "task_id": task_id})
+        completed_msg = {"type": "TASK_COMPLETED", "task_id": task_id}
     except Exception as e:
         task_manager.fail_task(task_id, str(e))
-        _notify_clients(task_id, {"type": "TASK_FAILED", "task_id": task_id, "error": str(e)})
+        completed_msg = {"type": "TASK_FAILED", "task_id": task_id, "error": str(e)}
     finally:
-        release_db()  # Release thread-local SQLite connection so WAL can checkpoint
+        release_db()
+        checkpoint_db()
+        if completed_msg:
+            _notify_clients(task_id, completed_msg)
 
 
 class CreateTaskRequest(BaseModel):
@@ -209,6 +213,18 @@ def run_next_task():
 @router.websocket("/{task_id}/stream")
 async def task_websocket(websocket: WebSocket, task_id: str):
     await websocket.accept()
+    # If task already finished, tell the client immediately so it doesn't hang
+    task = task_manager.get_task(task_id)
+    if task:
+        if task.status == TaskStatus.COMPLETED:
+            await websocket.send_text(json.dumps({"type": "TASK_COMPLETED", "task_id": task_id}))
+            return
+        elif task.status == TaskStatus.FAILED:
+            await websocket.send_text(json.dumps({"type": "TASK_FAILED", "task_id": task_id, "error": task.error_message or ""}))
+            return
+        elif task.status == TaskStatus.CANCELLED:
+            await websocket.send_text(json.dumps({"type": "TASK_CANCELLED", "task_id": task_id}))
+            return
     if task_id not in _active_connections:
         _active_connections[task_id] = []
     _active_connections[task_id].append(websocket)
@@ -216,4 +232,5 @@ async def task_websocket(websocket: WebSocket, task_id: str):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        _active_connections[task_id].remove(websocket)
+        if websocket in _active_connections.get(task_id, []):
+            _active_connections[task_id].remove(websocket)

@@ -133,6 +133,15 @@ class TaskManager:
 
     def save_individuals(self, task_id: str, generation: int, individuals: list[dict]):
         conn = get_db()
+        SQL = """INSERT INTO individuals
+               (task_id, generation, strategy_id, params_json,
+                pareto_rank, crowding_distance, is_elite,
+                cagr, max_drawdown, sharpe_ratio, profit_factor,
+                win_rate, r2, trade_count, oos_consistency_score,
+                passed_absolute, passed_dynamic, elimination_reason,
+                equity_curve_json, symbol_results_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        CHUNK = 50
         rows = []
         for ind in individuals:
             rows.append((
@@ -159,18 +168,9 @@ class TaskManager:
                 }) if ind.get("equity_curve") else None,
                 json.dumps(ind.get("symbol_results", {})) if ind.get("symbol_results") else None,
             ))
-        conn.executemany(
-            """INSERT INTO individuals
-               (task_id, generation, strategy_id, params_json,
-                pareto_rank, crowding_distance, is_elite,
-                cagr, max_drawdown, sharpe_ratio, profit_factor,
-                win_rate, r2, trade_count, oos_consistency_score,
-                passed_absolute, passed_dynamic, elimination_reason,
-                equity_curve_json, symbol_results_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            rows,
-        )
-        conn.commit()
+        for i in range(0, len(rows), CHUNK):
+            conn.executemany(SQL, rows[i:i + CHUNK])
+            conn.commit()
         conn.close()
 
     def save_pareto_front(self, task_id: str, generation: int, front_data: list[dict]):

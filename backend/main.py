@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from database import init_db, sync_strategies_to_local
+from database import init_db, sync_strategies_to_local, checkpoint_db
 from seed import seed_templates
 from routes.strategies import router as strategies_router
 from routes.backtest import router as backtest_router
@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
     set_event_loop(loop)
     set_pt_event_loop(loop)
     init_db()
+    checkpoint_db()
     seed_templates()
     ticker.start()
     yield

@@ -229,8 +229,9 @@ def get_db() -> "_PooledConn":
         raw.row_factory = sqlite3.Row
         raw.execute("PRAGMA journal_mode=WAL")
         raw.execute("PRAGMA synchronous=NORMAL")
-        raw.execute("PRAGMA busy_timeout=5000")
+        raw.execute("PRAGMA busy_timeout=30000")
         raw.execute("PRAGMA foreign_keys=ON")
+        raw.execute("PRAGMA wal_autocheckpoint=200")
         raw.commit()
         conn = _PooledConn(raw)
         _db_local.conn = conn
@@ -246,6 +247,17 @@ def release_db():
         except Exception:
             pass
         _db_local.conn = None
+
+
+def checkpoint_db():
+    """Force WAL checkpoint using a fresh connection after a task completes."""
+    try:
+        import sqlite3 as _sq
+        c = _sq.connect(LOCAL_DB_PATH, timeout=15)
+        c.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        c.close()
+    except Exception:
+        pass
 
 
 def get_turso() -> _TursoConnection:
