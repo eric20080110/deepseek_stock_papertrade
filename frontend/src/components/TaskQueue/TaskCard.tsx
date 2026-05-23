@@ -143,7 +143,6 @@ export function TaskCard({ task, onRefresh }: Props) {
           </button>
         )}
       </div>
-      </div>
     </div>
     {showDeleteModal && (
       <ConfirmModal
