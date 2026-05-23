@@ -3,7 +3,7 @@ import math
 import time
 import threading
 import asyncio
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Any, Optional
 
@@ -147,8 +147,19 @@ def get_task(task_id: str):
     return task
 
 
+def _vacuum_after_purge():
+    import sqlite3 as _sqlite3
+    from database import LOCAL_DB_PATH
+    try:
+        c = _sqlite3.connect(LOCAL_DB_PATH, timeout=60)
+        c.execute("VACUUM")
+        c.close()
+    except Exception:
+        pass
+
+
 @router.delete("/{task_id}")
-def cancel_task(task_id: str, purge: bool = False):
+def cancel_task(task_id: str, background_tasks: BackgroundTasks, purge: bool = False):
     if purge:
         import sqlite3 as _sqlite3
         from database import LOCAL_DB_PATH
@@ -168,6 +179,7 @@ def cancel_task(task_id: str, purge: bool = False):
             t.execute("DELETE FROM evolution_task_results WHERE task_id = ?", (task_id,))
         except Exception:
             pass
+        background_tasks.add_task(_vacuum_after_purge)
         return {"detail": "Task purged"}
     ok = task_manager.cancel_task(task_id)
     if not ok:

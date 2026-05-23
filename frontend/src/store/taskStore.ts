@@ -10,6 +10,7 @@ interface IndividualProgress {
 interface TaskState {
   tasks: EvolutionTask[]
   activeTaskId: string | null
+  dbStatusVersion: number
   selectedAnalysisTaskId: string | null
   currentView: ViewType
   generationHistory: GenerationResult[]
@@ -34,11 +35,13 @@ interface TaskState {
   setSeedParams: (params: Record<string, any> | null) => void
   clearGenerationHistory: () => void
   setIndividualProgress: (progress: IndividualProgress | null) => void
+  triggerDbStatusRefresh: () => void
 }
 
 export const useTaskStore = create<TaskState>((set) => ({
   tasks: [],
   activeTaskId: null,
+  dbStatusVersion: 0,
   selectedAnalysisTaskId: null,
   currentView: 'queue',
   generationHistory: [],
@@ -71,4 +74,5 @@ export const useTaskStore = create<TaskState>((set) => ({
   setSeedParams: (params) => set({ seedParams: params }),
   clearGenerationHistory: () => set({ generationHistory: [], individualProgress: null }),
   setIndividualProgress: (progress) => set({ individualProgress: progress }),
+  triggerDbStatusRefresh: () => set((s) => ({ dbStatusVersion: s.dbStatusVersion + 1 })),
 }))

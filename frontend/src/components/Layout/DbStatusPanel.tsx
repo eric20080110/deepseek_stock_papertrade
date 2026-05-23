@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Database, ChevronDown, ChevronUp } from 'lucide-react'
+import { useTaskStore } from '../../store/taskStore'
 
 interface DbStatus {
   local: {
@@ -28,6 +29,7 @@ const ROW_LABELS: Record<string, string> = {
 export function DbStatusPanel() {
   const [status, setStatus] = useState<DbStatus | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const dbStatusVersion = useTaskStore((s) => s.dbStatusVersion)
 
   useEffect(() => {
     const fetch_ = () =>
@@ -39,6 +41,14 @@ export function DbStatusPanel() {
     const t = setInterval(fetch_, 30000)
     return () => clearInterval(t)
   }, [])
+
+  useEffect(() => {
+    if (dbStatusVersion === 0) return
+    fetch('/system/db-status')
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => {})
+  }, [dbStatusVersion])
 
   if (!status) return null
 

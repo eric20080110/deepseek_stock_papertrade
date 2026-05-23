@@ -21,6 +21,7 @@ export function TaskCard({ task, onRefresh }: Props) {
   const cfg = statusConfig[task.status]
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
   const setSelectedAnalysisTaskId = useTaskStore((s) => s.setSelectedAnalysisTaskId)
+  const triggerDbStatusRefresh = useTaskStore((s) => s.triggerDbStatusRefresh)
   const [deleting, setDeleting] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [draftName, setDraftName] = useState(task.name || '')
@@ -50,6 +51,7 @@ export function TaskCard({ task, onRefresh }: Props) {
       if (!res.ok) throw new Error(`${res.status}`)
       toast.success('任務已刪除')
       onRefresh()
+      triggerDbStatusRefresh()
     } catch (e) {
       toast.error('刪除失敗，請重試')
       setDeleting(false)
