@@ -149,6 +149,35 @@ def _fetch_klines(
     return df
 
 
+def _yf_symbol(symbol: str) -> str:
+    if symbol.endswith("USDT"):
+        return symbol[:-4] + "-USD"
+    if symbol.endswith("USD"):
+        return symbol[:-3] + "-USD"
+    return symbol + "-USD"
+
+
+def _fetch_yfinance(symbol: str, timeframe: str, start_ms: int, end_ms: int) -> Optional[pd.DataFrame]:
+    try:
+        import yfinance as yf
+        tf_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d"}
+        interval = tf_map.get(timeframe, "1h")
+        import datetime
+        start_dt = datetime.datetime.fromtimestamp(start_ms / 1000, tz=datetime.timezone.utc)
+        end_dt = datetime.datetime.fromtimestamp(end_ms / 1000, tz=datetime.timezone.utc)
+        raw = yf.download(_yf_symbol(symbol), start=start_dt, end=end_dt,
+                          interval=interval, progress=False, auto_adjust=True)
+        if raw is None or raw.empty:
+            return None
+        df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
+        df.columns = ["open", "high", "low", "close", "volume"]
+        df.index = (pd.to_datetime(df.index).astype("int64") // 10**9)
+        df.index.name = "timestamp"
+        return df.dropna()
+    except Exception:
+        return None
+
+
 def _load_sqlite(symbol: str, timeframe: str, start_ts: int, end_ts: int) -> Optional[pd.DataFrame]:
     from database import get_db
     conn = get_db()
@@ -261,8 +290,10 @@ def fetch_ohlcv(
             pq_put(symbol, timeframe, cached)
             return cached
 
-    # 3. Fetch from Binance
+    # 3. Fetch from Binance, fall back to yfinance if blocked/unavailable
     df = _fetch_klines(symbol, timeframe, start_ts * 1000, end_ts * 1000)
+    if df is None:
+        df = _fetch_yfinance(symbol, timeframe, start_ts * 1000, end_ts * 1000)
     if df is not None:
         _save_sqlite(df, symbol, timeframe)
         pq_put(symbol, timeframe, df)

@@ -60,6 +60,12 @@ async def lifespan(app):
             logger.info("Startup tick complete for %d running instances", sum(1 for i in instances if i.status == InstanceStatus.RUNNING))
         except Exception as e:
             logger.warning("Startup tick failed: %s", e)
+        # Pre-warm OHLCV cache in background so first real tick is fast
+        try:
+            engine.prewarm_cache()
+            logger.info("Cache pre-warm started")
+        except Exception as e:
+            logger.warning("Cache pre-warm failed: %s", e)
     yield
     if _keepalive_task:
         _keepalive_task.cancel()

@@ -246,15 +246,15 @@ class PaperTradingEngine:
         from backtest.data_cache import DATA_CACHE
         bar_sec = self._BAR_SEC.get(timeframe, 86400)
         now = int(time.time())
-        df = DATA_CACHE.ensure(sym, timeframe=timeframe)
+        # Only check in-memory — never block the main thread with a network call.
+        df = DATA_CACHE.load(sym, timeframe)
         if df is not None and len(df) > 0:
             if now - int(df.index[-1]) <= bar_sec * 5:
                 return df
-            # Stale — kick off background refresh and return current data immediately.
-            # Next tick will pick up the fresh data once the background fetch completes.
+            # Stale — background refresh, return stale data immediately.
             _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, timeframe, True)
             return df
-        # Nothing cached at all (cold start) — wait up to 8s for first fetch.
+        # Nothing in memory — fetch in executor with timeout so we never block.
         try:
             future = _DATA_FETCH_EXECUTOR.submit(
                 DATA_CACHE.ensure, sym, None, None, timeframe, True
@@ -262,6 +262,15 @@ class PaperTradingEngine:
             return future.result(timeout=8)
         except Exception:
             return None
+
+    def prewarm_cache(self):
+        """Background-fetch OHLCV for all running instances so first tick is fast."""
+        from backtest.data_cache import DATA_CACHE
+        for ctx in self._running_instances.values():
+            symbols = ctx.get("symbols", [])
+            timeframe = ctx.get("timeframe", "1m")
+            for sym in symbols:
+                _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, timeframe, True)
 
     def _save_equity_point(self, instance_id: str, ts: int, equity: float):
         ctx = self._running_instances.get(instance_id)
