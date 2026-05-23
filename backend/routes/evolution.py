@@ -144,13 +144,19 @@ def get_task(task_id: str):
 @router.delete("/{task_id}")
 def cancel_task(task_id: str, purge: bool = False):
     if purge:
-        local = get_db()
-        local.execute("DELETE FROM individuals WHERE task_id = ?", (task_id,))
-        local.execute("DELETE FROM task_generations WHERE task_id = ?", (task_id,))
-        local.execute("DELETE FROM pareto_fronts WHERE task_id = ?", (task_id,))
-        local.execute("DELETE FROM evolution_tasks WHERE task_id = ?", (task_id,))
-        local.commit()
-        local.close()
+        import sqlite3 as _sqlite3
+        from database import LOCAL_DB_PATH
+        raw = _sqlite3.connect(LOCAL_DB_PATH, timeout=30.0)
+        raw.row_factory = _sqlite3.Row
+        raw.execute("PRAGMA journal_mode=WAL")
+        try:
+            raw.execute("DELETE FROM individuals WHERE task_id = ?", (task_id,))
+            raw.execute("DELETE FROM task_generations WHERE task_id = ?", (task_id,))
+            raw.execute("DELETE FROM pareto_fronts WHERE task_id = ?", (task_id,))
+            raw.execute("DELETE FROM evolution_tasks WHERE task_id = ?", (task_id,))
+            raw.commit()
+        finally:
+            raw.close()
         try:
             t = get_turso()
             t.execute("DELETE FROM evolution_task_results WHERE task_id = ?", (task_id,))
