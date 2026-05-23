@@ -302,9 +302,12 @@ def fetch_ohlcv(
     if df is None:
         df = _fetch_klines(symbol, timeframe, start_ts * 1000, end_ts * 1000)
     if df is not None:
-        _save_sqlite(df, symbol, timeframe)
+        try:
+            _save_sqlite(df, symbol, timeframe)
+        except Exception:
+            pass
         pq_put(symbol, timeframe, df)
-        return _load_sqlite(symbol, timeframe, start_ts, end_ts)
+        return df  # Return fetched df directly; don't re-read from Turso
     return cached
 
 
