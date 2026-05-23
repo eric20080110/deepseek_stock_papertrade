@@ -290,10 +290,10 @@ def fetch_ohlcv(
             pq_put(symbol, timeframe, cached)
             return cached
 
-    # 3. Fetch from Binance, fall back to yfinance if blocked/unavailable
-    df = _fetch_klines(symbol, timeframe, start_ts * 1000, end_ts * 1000)
+    # 3. Try yfinance first (works from all regions), then Binance as fallback
+    df = _fetch_yfinance(symbol, timeframe, start_ts * 1000, end_ts * 1000)
     if df is None:
-        df = _fetch_yfinance(symbol, timeframe, start_ts * 1000, end_ts * 1000)
+        df = _fetch_klines(symbol, timeframe, start_ts * 1000, end_ts * 1000)
     if df is not None:
         _save_sqlite(df, symbol, timeframe)
         pq_put(symbol, timeframe, df)

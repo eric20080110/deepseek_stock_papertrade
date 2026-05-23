@@ -259,7 +259,7 @@ class PaperTradingEngine:
             future = _DATA_FETCH_EXECUTOR.submit(
                 DATA_CACHE.ensure, sym, None, None, timeframe, True
             )
-            return future.result(timeout=8)
+            return future.result(timeout=15)
         except Exception:
             return None
 
