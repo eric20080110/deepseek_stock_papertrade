@@ -147,7 +147,18 @@ class EvolutionEngine:
         max_gen = cfg.max_generations or EVO_SETTINGS.get_default_generations(timeframe)
         early_stop = cfg.early_stop_generations or EVO_SETTINGS.default_early_stop_generations
 
-        symbols = cfg.symbols
+        # Rotation strategies: always fetch their fixed symbol universe
+        from strategies.base import get_strategy_module as _get_mod
+        _mod = _get_mod(template_id)
+        if _mod and getattr(_mod, "IS_ROTATION", False):
+            rot_syms = list(getattr(_mod, "ROTATION_SYMBOLS", cfg.symbols))
+            spy_sym = getattr(_mod, "SPY_SYMBOL", "SPY")
+            if spy_sym not in rot_syms:
+                rot_syms.append(spy_sym)
+            symbols = rot_syms
+        else:
+            symbols = cfg.symbols
+
         data_map = {}
         for sym in symbols:
             df = DATA_CACHE.ensure(

@@ -66,6 +66,30 @@ TEMPLATES = [
         ],
     },
     {
+        "template_id": "omniscient_paradox",
+        "name": "Omniscient Paradox（槓桿ETF動量輪換）",
+        "description": "每日在8支槓桿ETF間輪換，使用多周期動量評分（ROC9/21/63）+ 波動率調整 + 趨勢過濾（SMA50）+ RSI懲罰，並以SPY SMA200作為大盤趨勢濾網。持倉集中單一資產，波動率目標化配置。",
+        "parameters": [
+            {"type": "integer",    "name": "roc_fast_period",       "label": "短期ROC周期",  "min": 5,   "max": 21,  "default": 9,   "step": 1},
+            {"type": "integer",    "name": "roc_med_period",        "label": "中期ROC周期",  "min": 10,  "max": 40,  "default": 21,  "step": 1},
+            {"type": "integer",    "name": "roc_slow_period",       "label": "長期ROC周期",  "min": 40,  "max": 120, "default": 63,  "step": 1},
+            {"type": "integer",    "name": "vol_period",            "label": "波動率周期",   "min": 10,  "max": 30,  "default": 21,  "step": 1},
+            {"type": "integer",    "name": "rsi_period",            "label": "RSI周期",      "min": 7,   "max": 21,  "default": 14,  "step": 1},
+            {"type": "integer",    "name": "sma_period",            "label": "SMA周期",      "min": 20,  "max": 100, "default": 50,  "step": 1},
+            {"type": "integer",    "name": "spy_sma_period",        "label": "SPY趨勢SMA",   "min": 100, "max": 300, "default": 200, "step": 10},
+            {"type": "integer",    "name": "lookback_vol",          "label": "波動率回看",   "min": 10,  "max": 40,  "default": 20,  "step": 1},
+            {"type": "continuous", "name": "fast_weight",           "label": "短ROC權重",    "min": 0.2, "max": 0.7, "default": 0.5},
+            {"type": "continuous", "name": "med_weight",            "label": "中ROC權重",    "min": 0.1, "max": 0.5, "default": 0.3},
+            {"type": "continuous", "name": "slow_weight",           "label": "長ROC權重",    "min": 0.05,"max": 0.4, "default": 0.2},
+            {"type": "continuous", "name": "target_vol",            "label": "目標波動率",   "min": 0.4, "max": 1.0, "default": 0.8},
+            {"type": "continuous", "name": "confidence_threshold",  "label": "切換信心門檻",  "min": 0.0, "max": 0.3, "default": 0.1},
+            {"type": "continuous", "name": "rsi_overbought",        "label": "RSI超買門檻",  "min": 70.0,"max": 95.0,"default": 85.0},
+            {"type": "continuous", "name": "rsi_oversold",          "label": "RSI超賣門檻",  "min": 15.0,"max": 40.0,"default": 30.0},
+            {"type": "continuous", "name": "rsi_penalty",           "label": "RSI懲罰係數",  "min": 0.5, "max": 1.0, "default": 0.9},
+        ],
+        "constraints": [],
+    },
+    {
         "template_id": "macd_momentum",
         "name": "MACD 動能",
         "description": "MACD 穿越信號線配合柱狀圖確認，支援趨勢過濾",
@@ -94,19 +118,11 @@ def seed_templates():
     init_db()
     try:
         t = get_turso()
-        existing = t.execute("SELECT COUNT(*) FROM strategy_configs WHERE is_template = 1").fetchone()[0]
-        if existing > 0:
-            sync_strategies_to_local()
-            return
         _seed_into(t)
         sync_strategies_to_local()
     except RuntimeError:
         from database import get_db as _get_local
         local = _get_local()
-        existing = local.execute("SELECT COUNT(*) FROM strategy_configs WHERE is_template = 1").fetchone()[0]
-        if existing > 0:
-            local.close()
-            return
         _seed_into(local)
         local.commit()
         local.close()
@@ -114,10 +130,17 @@ def seed_templates():
 
 def _seed_into(dest):
     now = int(time.time())
+    existing_ids = {
+        r[0] for r in dest.execute(
+            "SELECT template_id FROM strategy_configs WHERE is_template = 1"
+        ).fetchall()
+    }
     for tmpl in TEMPLATES:
+        if tmpl["template_id"] in existing_ids:
+            continue
         config_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"template/{tmpl['template_id']}"))
         dest.execute(
-            """INSERT INTO strategy_configs
+            """INSERT OR IGNORE INTO strategy_configs
                (config_id, name, description, template_id, is_template, is_locked,
                 parameters_json, constraints_json, created_at, updated_at)
                VALUES (?, ?, ?, ?, 1, 0, ?, ?, ?, ?)""",

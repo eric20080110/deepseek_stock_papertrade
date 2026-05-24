@@ -85,11 +85,61 @@ def _run_on_window(params: dict, symbols: list[str], sid: str, icap: float,
     return {"is": weighted, "oos": oos_weighted, "symbol_results": {sr["symbol"]: sr for sr in is_results}}
 
 
+def _run_one_rotation(params: dict, sid: str, icap: float) -> Optional[dict]:
+    from strategies.base import get_strategy_module
+    from backtest.rotation_engine import run_rotation_backtest
+    mod = get_strategy_module(sid)
+    rot_symbols = list(getattr(mod, "ROTATION_SYMBOLS", []))
+    safe_sym = getattr(mod, "SAFE_SYMBOL", "BIL")
+    spy_sym = getattr(mod, "SPY_SYMBOL", "SPY")
+
+    all_syms = rot_symbols + ([spy_sym] if spy_sym not in rot_symbols else [])
+    data_map = {}
+    for sym in all_syms:
+        df = DATA_CACHE.ensure(sym)
+        if df is not None:
+            data_map[sym] = df
+
+    if not data_map:
+        return None
+
+    result = run_rotation_backtest(
+        data_map, params, initial_capital=icap,
+        rotation_symbols=rot_symbols, safe_symbol=safe_sym, spy_symbol=spy_sym,
+    )
+    if result is None:
+        return None
+
+    is_metrics = {
+        "annualized_return": result.annualized_return,
+        "sharpe_ratio": result.sharpe_ratio,
+        "max_drawdown": result.max_drawdown,
+        "profit_factor": result.profit_factor,
+        "win_rate": result.win_rate,
+        "trade_count": result.trade_count,
+        "equity_curve": result.equity_curve,
+        "equity_timestamps": result.equity_timestamps,
+    }
+    return {
+        "strategy_id": str(uuid.uuid4()),
+        "params": params,
+        "symbol_results": {result.symbol: result},
+        "weighted_metrics": is_metrics,
+        "oos_metrics": None,
+    }
+
+
 def _run_one(params: dict) -> Optional[dict]:
     sid = _WORKER_CTX["strategy_id"]
     symbols = _WORKER_CTX["symbols"]
     icap = _WORKER_CTX["initial_capital"]
     walk_maps = _WORKER_CTX.get("walk_data_maps", [])
+
+    # Rotation strategy: different execution path
+    from strategies.base import get_strategy_module
+    mod = get_strategy_module(sid)
+    if mod and getattr(mod, "IS_ROTATION", False):
+        return _run_one_rotation(params, sid, icap)
 
     window_results = []
     for is_map, oos_map in walk_maps:

@@ -4,4 +4,5 @@ STRATEGY_REGISTRY: dict[str, str] = {
     "bollinger_breakout": "strategies.bollinger_breakout",
     "macd_momentum": "strategies.macd_momentum",
     "always_buy": "strategies.always_buy",
+    "omniscient_paradox": "strategies.omniscient_paradox",
 }
