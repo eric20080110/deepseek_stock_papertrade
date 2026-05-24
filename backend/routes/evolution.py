@@ -62,11 +62,16 @@ def _run_task_background(task_id: str):
             on_generation=lambda g: _broadcast_generation(g, task_id),
             on_progress=progress,
         )
-        sync_task_to_turso(task_id)
         completed_msg = {"type": "TASK_COMPLETED", "task_id": task_id}
     except Exception as e:
         task_manager.fail_task(task_id, str(e))
         completed_msg = {"type": "TASK_FAILED", "task_id": task_id, "error": str(e)}
+
+    # Turso sync is best-effort: network errors must never flip a completed task to failed
+    try:
+        sync_task_to_turso(task_id)
+    except Exception:
+        pass
     finally:
         release_db()
         checkpoint_db()
