@@ -63,6 +63,8 @@ export interface StrategyConfig {
   is_template: boolean
   is_locked: boolean
   locked_by_task_id: string | null
+  is_rotation: boolean
+  rotation_symbols: string[]
   parameters: ParamDef[]
   constraints: ConstraintDef[]
   created_at: number

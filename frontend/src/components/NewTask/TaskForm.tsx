@@ -38,6 +38,8 @@ export function TaskForm() {
   const [estimate, setEstimate] = useState<{ estimated_seconds: number; time_per_gen_sec: number } | null>(null)
   const [estimating, setEstimating] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [isRotation, setIsRotation] = useState(false)
+  const [rotationSymbols, setRotationSymbols] = useState<string[]>([])
 
   const addTask = useTaskStore((s) => s.addTask)
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
@@ -68,6 +70,12 @@ export function TaskForm() {
     })
   }, [])
 
+  useEffect(() => {
+    if (!strategyId) { setIsRotation(false); setRotationSymbols([]); return }
+    const s = strategies.find((x) => x.config_id === strategyId)
+    if (s) { setIsRotation(s.is_rotation); setRotationSymbols(s.rotation_symbols) }
+  }, [strategyId, strategies])
+
   const handleOpenConfirm = async () => {
     if (!valid) return
     setEstimating(true)
@@ -89,12 +97,12 @@ export function TaskForm() {
   }
 
   const handleSubmit = async () => {
-    if (!strategyId || symbols.length === 0 || !startDate || !endDate) return
+    if (!strategyId || (!isRotation && symbols.length === 0) || !startDate || !endDate) return
     setSaving(true)
     try {
       const body: Record<string, any> = {
         strategy_config_id: strategyId,
-        symbols,
+        symbols: isRotation ? [] : symbols,
         start_date: startDate,
         end_date: endDate,
         timeframe,
@@ -127,7 +135,7 @@ export function TaskForm() {
     setMaxGens(d.gens)
   }
 
-  const valid = strategyId && symbols.length > 0 && startDate && endDate
+  const valid = strategyId && (isRotation || symbols.length > 0) && startDate && endDate
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
@@ -158,7 +166,18 @@ export function TaskForm() {
           </select>
         </div>
 
-        <SymbolInput symbols={symbols} onChange={setSymbols} />
+        {isRotation ? (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="text-sm font-medium text-blue-800 mb-1">固定輪換標的（自動套用，無需選擇）</div>
+            <div className="flex flex-wrap gap-1.5">
+              {rotationSymbols.map((s) => (
+                <span key={s} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{s}</span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <SymbolInput symbols={symbols} onChange={setSymbols} />
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -257,7 +276,7 @@ export function TaskForm() {
             <h3 className="text-lg font-bold mb-2">確認執行</h3>
             <div className="text-sm text-gray-600 mb-4 space-y-1">
               <p>策略：{strategies.find(s => s.config_id === strategyId)?.name}</p>
-              <p>標的：{symbols.join(', ')}</p>
+              <p>標的：{isRotation ? `輪換 (${rotationSymbols.join(', ')})` : symbols.join(', ')}</p>
               <p>週期：{TF_LABELS[timeframe] || timeframe}</p>
               <p>族群：{popSize} ｜ 世代：{maxGens}</p>
               <div className="mt-3 pt-3 border-t space-y-1">

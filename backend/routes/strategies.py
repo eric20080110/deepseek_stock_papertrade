@@ -40,19 +40,43 @@ class StrategyUpdateBody(BaseModel):
     constraints: list[dict[str, Any]] = []
 
 
+def _is_rotation(template_id: str) -> bool:
+    try:
+        from strategies.base import get_strategy_module
+        mod = get_strategy_module(template_id)
+        return bool(mod and getattr(mod, "IS_ROTATION", False))
+    except Exception:
+        return False
+
+
+def _rotation_symbols(template_id: str) -> list[str]:
+    try:
+        from strategies.base import get_strategy_module
+        mod = get_strategy_module(template_id)
+        if mod:
+            return list(getattr(mod, "ROTATION_SYMBOLS", []))
+    except Exception:
+        pass
+    return []
+
+
 def _row_to_dict(row) -> dict:
     params = json.loads(row["parameters_json"])
     for p in params:
         if p.get("type") == "boolean" and "controls" not in p:
             p["controls"] = []
+    tid = row["template_id"] or ""
+    rotation = _is_rotation(tid)
     return {
         "config_id": row["config_id"],
         "name": row["name"],
         "description": row["description"],
-        "template_id": row["template_id"],
+        "template_id": tid,
         "is_template": bool(row["is_template"]),
         "is_locked": bool(row["is_locked"]),
         "locked_by_task_id": row["locked_by_task_id"],
+        "is_rotation": rotation,
+        "rotation_symbols": _rotation_symbols(tid) if rotation else [],
         "parameters": params,
         "constraints": json.loads(row["constraints_json"]),
         "created_at": row["created_at"],
