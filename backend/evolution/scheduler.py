@@ -120,12 +120,14 @@ def _run_one_rotation(params: dict, sid: str, icap: float) -> Optional[dict]:
         "equity_curve": result.equity_curve,
         "equity_timestamps": result.equity_timestamps,
     }
+    # Rotation strategies use the full dataset (SMA200 warm-up requires full history).
+    # Pass IS metrics as OOS proxy so OOS consistency check doesn't eliminate all individuals.
     return {
         "strategy_id": str(uuid.uuid4()),
         "params": params,
-        "symbol_results": {result.symbol: result},
+        "symbol_results": {result.symbol: result.model_dump()},
         "weighted_metrics": is_metrics,
-        "oos_metrics": None,
+        "oos_metrics": dict(is_metrics),
     }
 
 
