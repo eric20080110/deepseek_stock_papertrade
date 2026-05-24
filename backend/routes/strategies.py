@@ -124,13 +124,11 @@ def create_strategy(body: StrategyCreateBody):
         (config_id, body.name, body.description, body.template_id,
          json.dumps(merged_params), json.dumps(merged_constraints), now, now),
     )
+    row = t.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (config_id,)).fetchone()
     if not is_remote:
         t.commit()
         t.close()
     _sync_bg()
-    conn = get_db()
-    row = conn.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (config_id,)).fetchone()
-    conn.close()
     return _row_to_dict(row)
 
 
@@ -154,13 +152,11 @@ def update_strategy(config_id: str, body: StrategyUpdateBody):
            WHERE config_id = ?""",
         (body.name, body.description, json.dumps(body.parameters), json.dumps(body.constraints), now, config_id),
     )
+    row = t.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (config_id,)).fetchone()
     if not is_remote:
         t.commit()
         t.close()
     _sync_bg()
-    conn = get_db()
-    row = conn.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (config_id,)).fetchone()
-    conn.close()
     return _row_to_dict(row)
 
 
@@ -223,11 +219,9 @@ def duplicate_strategy(config_id: str):
         (new_id, new_name, row["description"], row["template_id"],
          row["parameters_json"], row["constraints_json"], now, now),
     )
+    new_row = t.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (new_id,)).fetchone()
     if not is_remote:
         t.commit()
         t.close()
     _sync_bg()
-    conn = get_db()
-    new_row = conn.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (new_id,)).fetchone()
-    conn.close()
     return _row_to_dict(new_row)
