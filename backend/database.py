@@ -131,13 +131,20 @@ class _TursoConnection:
             },
             method="POST",
         )
+        import concurrent.futures as _cf
+        def _do_request():
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return json.loads(resp.read().decode("utf-8"))
         try:
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                resp_data = json.loads(resp.read().decode("utf-8"))
+            with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(_do_request)
+                resp_data = future.result(timeout=4)
             for r in resp_data.get("results", []):
                 if r.get("type") == "error":
                     raise RuntimeError(f"Turso {label} error: {r.get('error', {}).get('message', str(r))}")
             return resp_data
+        except _cf.TimeoutError:
+            raise RuntimeError(f"Turso {label} timed out") from None
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
             raise RuntimeError(f"Turso {label} failed: {e}") from e
 

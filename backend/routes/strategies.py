@@ -1,5 +1,6 @@
 import json
 import time
+import threading
 import uuid
 
 from fastapi import APIRouter, HTTPException
@@ -7,6 +8,11 @@ from pydantic import BaseModel, Field
 from typing import Any, Optional
 
 from database import get_db, get_turso, sync_strategies_to_local
+
+
+def _sync_bg():
+    t = threading.Thread(target=sync_strategies_to_local, daemon=True)
+    t.start()
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
@@ -121,7 +127,7 @@ def create_strategy(body: StrategyCreateBody):
     if not is_remote:
         t.commit()
         t.close()
-    sync_strategies_to_local()
+    _sync_bg()
     conn = get_db()
     row = conn.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (config_id,)).fetchone()
     conn.close()
@@ -151,7 +157,7 @@ def update_strategy(config_id: str, body: StrategyUpdateBody):
     if not is_remote:
         t.commit()
         t.close()
-    sync_strategies_to_local()
+    _sync_bg()
     conn = get_db()
     row = conn.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (config_id,)).fetchone()
     conn.close()
@@ -192,7 +198,7 @@ def delete_strategy(config_id: str):
     conn.execute("DELETE FROM strategy_configs WHERE config_id = ?", (config_id,))
     conn.commit()
     conn.close()
-    sync_strategies_to_local()
+    _sync_bg()
     return {"detail": "Strategy deleted"}
 
 
@@ -220,7 +226,7 @@ def duplicate_strategy(config_id: str):
     if not is_remote:
         t.commit()
         t.close()
-    sync_strategies_to_local()
+    _sync_bg()
     conn = get_db()
     new_row = conn.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (new_id,)).fetchone()
     conn.close()
