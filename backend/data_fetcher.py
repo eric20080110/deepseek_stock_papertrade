@@ -149,12 +149,23 @@ def _fetch_klines(
     return df
 
 
+# Crypto base symbols that yfinance requires in "XXX-USD" format
+_CRYPTO_BASES = {
+    "BTC","ETH","BNB","SOL","XRP","ADA","DOGE","AVAX","DOT","MATIC",
+    "LINK","UNI","ATOM","LTC","ETC","XLM","ALGO","VET","FIL","TRX",
+    "NEAR","APT","ARB","OP","INJ","SUI","SEI","WLD","PEPE","SHIB",
+}
+
+
 def _yf_symbol(symbol: str) -> str:
     if symbol.endswith("USDT"):
         return symbol[:-4] + "-USD"
     if symbol.endswith("USD"):
         return symbol[:-3] + "-USD"
-    return symbol + "-USD"
+    if symbol.upper() in _CRYPTO_BASES:
+        return symbol.upper() + "-USD"
+    # US equity/ETF tickers: pass as-is (e.g. SOXL, SPY, TQQQ)
+    return symbol
 
 
 def _fetch_yfinance(symbol: str, timeframe: str, start_ms: int, end_ms: int) -> Optional[pd.DataFrame]:
