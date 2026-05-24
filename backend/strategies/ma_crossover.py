@@ -11,34 +11,33 @@ def generate_signals(ohlcv: pd.DataFrame, params: dict) -> pd.Series:
     vol_threshold = float(params.get("volume_threshold", 1.5))
 
     close = ohlcv["close"]
-    volume = ohlcv.get("volume", pd.Series(index=ohlcv.index, dtype=float))
 
     if ma_type == "EMA":
-        fast_ma = close.ewm(span=fast_p, adjust=False).mean()
-        slow_ma = close.ewm(span=slow_p, adjust=False).mean()
+        fast_ma = close.ewm(span=fast_p, adjust=False).mean().values
+        slow_ma = close.ewm(span=slow_p, adjust=False).mean().values
     else:
-        fast_ma = close.rolling(window=fast_p).mean()
-        slow_ma = close.rolling(window=slow_p).mean()
+        fast_ma = close.rolling(window=fast_p).mean().values
+        slow_ma = close.rolling(window=slow_p).mean().values
 
-    vol_ma = volume.rolling(window=vol_period).mean() if use_vf else None
+    n = len(ohlcv)
+    d = fast_ma - slow_ma
+    prev_d = np.empty_like(d)
+    prev_d[0] = 0.0
+    prev_d[1:] = d[:-1]
 
-    signals = pd.Series(0, index=ohlcv.index, dtype=int)
-    for i in range(1, len(ohlcv)):
-        if np.isnan(fast_ma.iloc[i]) or np.isnan(slow_ma.iloc[i]):
-            continue
-        prev_fast = fast_ma.iloc[i - 1]
-        prev_slow = slow_ma.iloc[i - 1]
-        curr_fast = fast_ma.iloc[i]
-        curr_slow = slow_ma.iloc[i]
+    valid = ~np.isnan(d) & ~np.isnan(prev_d)
+    long_cross = valid & (prev_d <= 0) & (d > 0)
+    short_cross = valid & (prev_d >= 0) & (d < 0)
+    long_cross[0] = False
+    short_cross[0] = False
 
-        if use_vf and vol_ma is not None and vol_ma.iloc[i] > 0:
-            vol_ok = volume.iloc[i] > vol_ma.iloc[i] * vol_threshold
-        else:
-            vol_ok = True
+    if use_vf:
+        vol = ohlcv.get("volume", pd.Series(0.0, index=ohlcv.index)).values
+        vol_ma = pd.Series(vol).rolling(window=vol_period).mean().values
+        vol_ok = (vol > vol_ma * vol_threshold) & ~np.isnan(vol_ma)
+        long_cross &= vol_ok
 
-        if prev_fast <= prev_slow and curr_fast > curr_slow and vol_ok:
-            signals.iloc[i] = 1
-        elif prev_fast >= prev_slow and curr_fast < curr_slow:
-            signals.iloc[i] = -1
-
-    return signals
+    sig = np.zeros(n, dtype=np.int8)
+    sig[long_cross] = 1
+    sig[short_cross] = -1
+    return pd.Series(sig.astype(int), index=ohlcv.index)
