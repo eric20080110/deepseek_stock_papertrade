@@ -11,6 +11,8 @@ export function CreateInstanceForm() {
   const [timeframe, setTimeframe] = useState('1d')
   const [saving, setSaving] = useState(false)
   const [params, setParams] = useState<Record<string, string>>({})
+  const [isRotation, setIsRotation] = useState(false)
+  const [rotationSymbols, setRotationSymbols] = useState<string[]>([])
 
   useEffect(() => {
     fetch('/strategies')
@@ -28,7 +30,12 @@ export function CreateInstanceForm() {
             defaults[p.name] = String(p.default ?? '')
           }
           setParams(defaults)
+          setIsRotation(s.is_rotation ?? false)
+          setRotationSymbols(s.rotation_symbols ?? [])
         })
+    } else {
+      setIsRotation(false)
+      setRotationSymbols([])
     }
   }, [strategyId])
 
@@ -39,7 +46,7 @@ export function CreateInstanceForm() {
   }
 
   const handleSubmit = async () => {
-    if (!name || !strategyId || symbols.length === 0) return
+    if (!name || !strategyId || (!isRotation && symbols.length === 0)) return
     setSaving(true)
     try {
       const parsedParams: Record<string, any> = {}
@@ -52,7 +59,7 @@ export function CreateInstanceForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name, strategy_config_id: strategyId, params: parsedParams,
-          symbols, initial_capital: capital, timeframe,
+          symbols: isRotation ? [] : symbols, initial_capital: capital, timeframe,
         }),
       })
       useTaskStore.getState().setCurrentView('analysis')
@@ -61,7 +68,7 @@ export function CreateInstanceForm() {
     setSaving(false)
   }
 
-  const valid = name && strategyId && symbols.length > 0
+  const valid = name && strategyId && (isRotation || symbols.length > 0)
 
   return (
     <div className="max-w-2xl mx-auto space-y-5">
@@ -97,20 +104,31 @@ export function CreateInstanceForm() {
         </div>
       )}
 
-      <div>
-        <label className="block text-sm font-medium mb-1">監控標的</label>
-        <div className="flex flex-wrap gap-1.5 mb-1.5">
-          {symbols.map((s) => (
-            <span key={s} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">
-              {s}
-              <button onClick={() => setSymbols(symbols.filter((x) => x !== s))} className="ml-1 cursor-pointer">×</button>
-            </span>
-          ))}
+      {isRotation ? (
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="text-sm font-medium text-blue-800 mb-1">固定輪換標的（自動套用，無需選擇）</div>
+          <div className="flex flex-wrap gap-1.5">
+            {rotationSymbols.map((s) => (
+              <span key={s} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{s}</span>
+            ))}
+          </div>
         </div>
-        <input value={symbolInput} onChange={(e) => setSymbolInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSymbol())}
-          placeholder="輸入代號按 Enter 加入" className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-      </div>
+      ) : (
+        <div>
+          <label className="block text-sm font-medium mb-1">監控標的</label>
+          <div className="flex flex-wrap gap-1.5 mb-1.5">
+            {symbols.map((s) => (
+              <span key={s} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">
+                {s}
+                <button onClick={() => setSymbols(symbols.filter((x) => x !== s))} className="ml-1 cursor-pointer">×</button>
+              </span>
+            ))}
+          </div>
+          <input value={symbolInput} onChange={(e) => setSymbolInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSymbol())}
+            placeholder="輸入代號按 Enter 加入" className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div>
