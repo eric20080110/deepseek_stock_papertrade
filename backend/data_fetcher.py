@@ -1,4 +1,4 @@
-import json
+import os
 import time
 import random
 import requests
@@ -7,6 +7,13 @@ from collections import deque
 from typing import Optional
 
 BINANCE_BASE = "https://fapi.binance.com"
+
+ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
+ALPACA_API_SECRET = os.environ.get("ALPACA_API_SECRET", "")
+_ALPACA_TF_MAP = {
+    "1m": "1Min", "5m": "5Min", "15m": "15Min",
+    "30m": "30Min", "1h": "1Hour", "1d": "1Day",
+}
 
 
 class RateLimitManager:
@@ -168,6 +175,78 @@ def _yf_symbol(symbol: str) -> str:
     return symbol
 
 
+def _is_us_equity(symbol: str) -> bool:
+    """True if symbol is a US stock/ETF (not a crypto pair)."""
+    return _yf_symbol(symbol) == symbol
+
+
+def _fetch_alpaca(symbol: str, timeframe: str, start_ms: int, end_ms: int) -> Optional[pd.DataFrame]:
+    if not ALPACA_API_KEY or not ALPACA_API_SECRET:
+        return None
+    tf = _ALPACA_TF_MAP.get(timeframe)
+    if not tf:
+        return None
+    try:
+        import datetime
+        start_str = datetime.datetime.fromtimestamp(
+            start_ms / 1000, tz=datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str = datetime.datetime.fromtimestamp(
+            end_ms / 1000, tz=datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        rows = []
+        page_token = None
+        headers = {
+            "APCA-API-KEY-ID": ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+        }
+
+        while True:
+            params: dict = {
+                "timeframe": tf,
+                "start": start_str,
+                "end": end_str,
+                "limit": 10000,
+                "feed": "iex",
+                "sort": "asc",
+            }
+            if page_token:
+                params["page_token"] = page_token
+
+            r = requests.get(
+                f"https://data.alpaca.markets/v2/stocks/{symbol}/bars",
+                headers=headers,
+                params=params,
+                timeout=30,
+            )
+            r.raise_for_status()
+            data = r.json()
+
+            for bar in data.get("bars") or []:
+                ts = int(pd.Timestamp(bar["t"]).timestamp())
+                rows.append({
+                    "timestamp": ts,
+                    "open": float(bar["o"]),
+                    "high": float(bar["h"]),
+                    "low": float(bar["l"]),
+                    "close": float(bar["c"]),
+                    "volume": float(bar["v"]),
+                })
+
+            page_token = data.get("next_page_token")
+            if not page_token:
+                break
+
+        if not rows:
+            return None
+        df = pd.DataFrame(rows).drop_duplicates(subset="timestamp").sort_values("timestamp")
+        df.set_index("timestamp", inplace=True)
+        return df
+    except Exception:
+        return None
+
+
 def _fetch_yfinance(symbol: str, timeframe: str, start_ms: int, end_ms: int) -> Optional[pd.DataFrame]:
     try:
         import yfinance as yf
@@ -308,10 +387,16 @@ def fetch_ohlcv(
             pq_put(symbol, timeframe, cached)
             return cached
 
-    # 3. Try yfinance first (works from all regions), then Binance as fallback
-    df = _fetch_yfinance(symbol, timeframe, start_ts * 1000, end_ts * 1000)
-    if df is None:
-        df = _fetch_klines(symbol, timeframe, start_ts * 1000, end_ts * 1000)
+    # 3. Fetch: US equity intraday → Alpaca first (years of history) → yfinance fallback
+    #          everything else → yfinance → Binance fallback
+    if _is_us_equity(symbol) and timeframe != "1d":
+        df = _fetch_alpaca(symbol, timeframe, start_ts * 1000, end_ts * 1000)
+        if df is None:
+            df = _fetch_yfinance(symbol, timeframe, start_ts * 1000, end_ts * 1000)
+    else:
+        df = _fetch_yfinance(symbol, timeframe, start_ts * 1000, end_ts * 1000)
+        if df is None:
+            df = _fetch_klines(symbol, timeframe, start_ts * 1000, end_ts * 1000)
     if df is not None:
         try:
             _save_sqlite(df, symbol, timeframe)
