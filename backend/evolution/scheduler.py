@@ -106,6 +106,7 @@ def _run_one_rotation(params: dict, sid: str, icap: float) -> Optional[dict]:
     result = run_rotation_backtest(
         data_map, params, initial_capital=icap,
         rotation_symbols=rot_symbols, safe_symbol=safe_sym, spy_symbol=spy_sym,
+        strategy_module=mod,
     )
     if result is None:
         return None

@@ -5,6 +5,9 @@ import threading
 import concurrent.futures
 from typing import Optional
 
+import numpy as np
+import pandas as pd
+
 _DATA_FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=3, thread_name_prefix="paper_data"
 )
@@ -166,22 +169,46 @@ class PaperTradingEngine:
         params = json.loads(inst.params_json) if isinstance(inst.params_json, str) else inst.params_json
         template_id = self._resolve_template_id(inst)
 
+        from strategies.base import get_strategy_module
+        mod = get_strategy_module(template_id)
+        is_rotation = bool(mod and getattr(mod, "IS_ROTATION", False))
+        rotation_symbols = list(getattr(mod, "ROTATION_SYMBOLS", [])) if is_rotation else []
+        safe_symbol = getattr(mod, "SAFE_SYMBOL", "BIL") if is_rotation else ""
+        spy_symbol = getattr(mod, "SPY_SYMBOL", "SPY") if is_rotation else ""
+
         conn = get_db()
-        for sym in symbols:
-            conn.execute(
-                "INSERT OR IGNORE INTO virtual_positions (instance_id, symbol, side) VALUES (?, ?, 'flat')",
+        if is_rotation:
+            # Include safe_symbol so we can park there; deduplicate with set
+            init_syms = list(dict.fromkeys(rotation_symbols + ([safe_symbol] if safe_symbol else [])))
+        else:
+            init_syms = symbols
+        for sym in init_syms:
+            # Use SELECT-then-INSERT to avoid duplicates (no UNIQUE constraint on table)
+            exists = conn.execute(
+                "SELECT 1 FROM virtual_positions WHERE instance_id = ? AND symbol = ?",
                 (instance_id, sym),
-            )
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO virtual_positions (instance_id, symbol, side) VALUES (?, ?, 'flat')",
+                    (instance_id, sym),
+                )
         conn.commit()
         conn.close()
 
         self.update_instance(instance_id, status="RUNNING")
-        self._running_instances[instance_id] = {
+        ctx: dict = {
             "template_id": template_id,
             "params": params,
             "symbols": symbols,
             "timeframe": inst.timeframe or "1d",
+            "is_rotation": is_rotation,
         }
+        if is_rotation:
+            ctx["rotation_symbols"] = rotation_symbols
+            ctx["safe_symbol"] = safe_symbol
+            ctx["spy_symbol"] = spy_symbol
+        self._running_instances[instance_id] = ctx
 
     def _resolve_template_id(self, inst) -> str:
         sid = inst.strategy_config_id
@@ -217,6 +244,10 @@ class PaperTradingEngine:
         params = json.loads(inst.params_json) if isinstance(inst.params_json, str) else inst.params_json
         template_id = self._resolve_template_id(inst)
 
+        from strategies.base import get_strategy_module
+        mod = get_strategy_module(template_id)
+        is_rotation = bool(mod and getattr(mod, "IS_ROTATION", False))
+
         # Load positions and realized PnL into memory to avoid Turso reads on every tick
         conn = get_db()
         pos_rows = conn.execute(
@@ -231,14 +262,20 @@ class PaperTradingEngine:
         positions = {r["symbol"]: dict(r) for r in pos_rows}
         realized_pnl = float(realized_row["rp"] or 0) if realized_row else 0.0
 
-        self._running_instances[instance_id] = {
+        ctx: dict = {
             "template_id": template_id,
             "params": params,
             "symbols": symbols,
             "timeframe": inst.timeframe or "1d",
             "positions": positions,
             "realized_pnl": realized_pnl,
+            "is_rotation": is_rotation,
         }
+        if is_rotation:
+            ctx["rotation_symbols"] = list(getattr(mod, "ROTATION_SYMBOLS", []))
+            ctx["safe_symbol"] = getattr(mod, "SAFE_SYMBOL", "BIL")
+            ctx["spy_symbol"] = getattr(mod, "SPY_SYMBOL", "SPY")
+        self._running_instances[instance_id] = ctx
 
     _BAR_SEC = {"1d": 86400, "1h": 3600, "30m": 1800, "15m": 900, "5m": 300, "1m": 60}
 
@@ -267,10 +304,16 @@ class PaperTradingEngine:
         """Background-fetch OHLCV for all running instances so first tick is fast."""
         from backtest.data_cache import DATA_CACHE
         for ctx in self._running_instances.values():
-            symbols = ctx.get("symbols", [])
             timeframe = ctx.get("timeframe", "1m")
-            for sym in symbols:
-                _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, timeframe, True)
+            if ctx.get("is_rotation"):
+                rot_syms = ctx.get("rotation_symbols", [])
+                spy = ctx.get("spy_symbol", "SPY")
+                safe = ctx.get("safe_symbol", "BIL")
+                for sym in set(rot_syms + [spy, safe]):
+                    _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, "1d", True)
+            else:
+                for sym in ctx.get("symbols", []):
+                    _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, timeframe, True)
 
     def _save_equity_point(self, instance_id: str, ts: int, equity: float):
         ctx = self._running_instances.get(instance_id)
@@ -312,6 +355,9 @@ class PaperTradingEngine:
         ctx = self._running_instances.get(instance_id)
         if not ctx:
             return None
+
+        if ctx.get("is_rotation"):
+            return self._tick_rotation(instance_id, ctx, inst)
 
         # Cooldown: skip duplicate ticks within 30s to prevent double-execution
         # when both internal PaperTicker and external /tick endpoint fire simultaneously
@@ -409,6 +455,171 @@ class PaperTradingEngine:
                 "metrics_ms": int((_t["metrics"]-_t.get("equity",_t["ensure"]))*1000) if "metrics" in _t else 0,
                 "save_equity_ms": int((_t["equity_save"]-_t["metrics"])*1000) if "metrics" in _t else 0,
             }
+        }
+        for cb in self._tick_callbacks:
+            try:
+                cb(instance_id, result)
+            except Exception:
+                pass
+        return result
+
+    def _tick_rotation(self, instance_id: str, ctx: dict, inst) -> Optional[dict]:
+        from strategies.base import get_strategy_module
+        from backtest.rotation_engine import _align_data
+        _mod = get_strategy_module(ctx["template_id"])
+        compute_indicators = _mod.compute_indicators
+        score_asset = _mod.score_asset
+
+        rotation_symbols: list[str] = ctx["rotation_symbols"]
+        safe_symbol: str = ctx["safe_symbol"]
+        spy_symbol: str = ctx["spy_symbol"]
+        params: dict = ctx["params"]
+
+        # Cooldown: daily strategy — skip ticks within 1h
+        now = time.time()
+        last_tick = ctx.get("_last_tick_ts", 0)
+        if now - last_tick < 3600:
+            return {"instance_id": instance_id, "events": [], "skipped": True}
+        ctx["_last_tick_ts"] = now
+
+        # Fetch 1d data for all symbols
+        all_syms = list({*rotation_symbols, spy_symbol, safe_symbol})
+        data_map: dict = {}
+        for sym in all_syms:
+            df = self._get_fresh_data(sym, "1d")
+            if df is not None and len(df) >= 70:
+                data_map[sym] = df
+
+        idx, close_arrays = _align_data(data_map)
+        if len(idx) < 70:
+            return {"instance_id": instance_id, "events": [], "skipped": True, "reason": "not_enough_data"}
+
+        risk_symbols = [s for s in rotation_symbols if s != safe_symbol and s in close_arrays]
+        if not risk_symbols:
+            return {"instance_id": instance_id, "events": [], "skipped": True, "reason": "no_risk_symbols"}
+
+        has_spy = spy_symbol in close_arrays
+        has_safe = safe_symbol in close_arrays
+
+        indicators = {sym: compute_indicators(close_arrays[sym], params) for sym in risk_symbols}
+
+        spy_sma_period = int(params.get("spy_sma_period", 200))
+        if has_spy:
+            spy_close = close_arrays[spy_symbol]
+            spy_sma = pd.Series(spy_close).rolling(spy_sma_period).mean().values
+        else:
+            spy_sma = np.full(len(idx), np.nan)
+            spy_close = np.ones(len(idx))
+
+        i = len(idx) - 1
+
+        scores: dict[str, float] = {}
+        for sym in risk_symbols:
+            px = float(close_arrays[sym][i]) if not np.isnan(close_arrays[sym][i]) else 0.0
+            if px <= 0:
+                continue
+            sc = score_asset(indicators[sym], px, i, params)
+            if not np.isnan(sc):
+                scores[sym] = sc
+
+        if not scores:
+            return {"instance_id": instance_id, "events": [], "skipped": True, "reason": "no_scores"}
+
+        spy_trend = True
+        if has_spy and not np.isnan(spy_sma[i]):
+            spy_trend = bool(spy_close[i] > spy_sma[i])
+
+        # Find current holding
+        conn = get_db()
+        pos_rows = conn.execute(
+            "SELECT * FROM virtual_positions WHERE instance_id = ? AND side != 'flat'",
+            (instance_id,),
+        ).fetchall()
+        conn.close()
+        current_asset = pos_rows[0]["symbol"] if pos_rows else None
+
+        confidence_threshold = float(params.get("confidence_threshold", 0.10))
+        best_sym = max(scores, key=lambda s: scores[s])
+        best_score = scores[best_sym]
+
+        # Determine target (mirrors rotation_engine logic)
+        if current_asset is None:
+            target_asset = best_sym if best_score > 0 else safe_symbol
+        elif current_asset == safe_symbol:
+            target_asset = best_sym if best_score > 0.02 else safe_symbol
+        else:
+            current_score = scores.get(current_asset, -999.0)
+            if best_score > current_score * (1 + confidence_threshold):
+                target_asset = best_sym
+            elif current_score < -0.02:
+                target_asset = safe_symbol
+            else:
+                target_asset = current_asset
+
+        if not spy_trend and target_asset != safe_symbol:
+            uup_score = scores.get("UUP", -999.0)
+            target_score = scores.get(target_asset, -999.0)
+            if uup_score > 0 and uup_score > target_score and "UUP" in close_arrays:
+                target_asset = "UUP"
+            elif target_score < 0:
+                target_asset = safe_symbol
+
+        events = []
+
+        if target_asset != current_asset:
+            # Close current
+            if current_asset is not None:
+                if current_asset in close_arrays and not np.isnan(close_arrays[current_asset][i]):
+                    close_px = float(close_arrays[current_asset][i])
+                else:
+                    close_px = float((pos_rows[0].get("current_price") or 0) if pos_rows else 0)
+                if close_px > 0:
+                    self._close_position(instance_id, current_asset, close_px, reason="rotation")
+                    events.append({"type": "close", "symbol": current_asset, "price": close_px, "reason": "rotation"})
+
+            # Open target
+            if target_asset and target_asset in close_arrays and not np.isnan(close_arrays[target_asset][i]):
+                entry_px = float(close_arrays[target_asset][i])
+                if entry_px > 0:
+                    # Volatility-targeted position size
+                    if target_asset != safe_symbol:
+                        target_vol = float(params.get("target_vol", 0.80))
+                        lookback_vol = int(params.get("lookback_vol", 20))
+                        arr = close_arrays.get(target_asset, np.array([]))
+                        start = max(0, i - lookback_vol)
+                        segment = arr[start:i]
+                        if len(segment) >= 2:
+                            rets = np.diff(segment) / np.maximum(segment[:-1], 1e-8)
+                            curr_vol = float(np.std(rets) * np.sqrt(252))
+                            weight = min(1.0, target_vol / curr_vol) if curr_vol > 1e-8 else 1.0
+                        else:
+                            weight = 1.0
+                    else:
+                        weight = 1.0
+
+                    alloc = self._compute_total_equity(instance_id) * weight
+                    self._open_position(instance_id, target_asset, 1, entry_px, alloc)
+                    events.append({"type": "open", "symbol": target_asset, "side": "long", "price": entry_px})
+        else:
+            # Update price for current holding
+            if current_asset and current_asset in close_arrays and not np.isnan(close_arrays[current_asset][i]):
+                self._update_position_price(instance_id, current_asset, float(close_arrays[current_asset][i]))
+
+        total_equity = self._compute_total_equity(instance_id)
+        if events:
+            self._update_instance_metrics(instance_id, total_equity)
+        self._save_equity_point(instance_id, int(time.time()), total_equity)
+
+        result = {
+            "instance_id": instance_id,
+            "total_equity": total_equity,
+            "events": events,
+            "rotation": {
+                "current": current_asset,
+                "target": target_asset,
+                "scores": {k: round(v, 4) for k, v in scores.items()},
+                "spy_trend": spy_trend,
+            },
         }
         for cb in self._tick_callbacks:
             try:

@@ -72,9 +72,15 @@ export function TaskForm() {
 
   useEffect(() => {
     if (!strategyId) { setIsRotation(false); setRotationSymbols([]); return }
-    const s = strategies.find((x) => x.config_id === strategyId)
-    if (s) { setIsRotation(s.is_rotation); setRotationSymbols(s.rotation_symbols) }
-  }, [strategyId, strategies])
+    fetch(`/strategies/${strategyId}`)
+      .then((r) => r.json())
+      .then((s: any) => {
+        setIsRotation(s.is_rotation ?? false)
+        setRotationSymbols(s.rotation_symbols ?? [])
+        if (s.is_rotation) setTimeframe('1d')
+      })
+      .catch(() => { setIsRotation(false); setRotationSymbols([]) })
+  }, [strategyId])
 
   const handleOpenConfirm = async () => {
     if (!valid) return
@@ -213,17 +219,23 @@ export function TaskForm() {
           })}
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">K 線週期</label>
-          <div className="flex gap-2 flex-wrap">
-            {['1d', '1h', '30m', '15m', '5m', '1m'].map((v) => (
-              <button key={v} onClick={() => handleTimeframeChange(v)}
-                className={`px-4 py-2 text-sm rounded-lg cursor-pointer ${timeframe === v ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                {TF_LABELS[v] || v}
-              </button>
-            ))}
+        {isRotation ? (
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500">
+            K 線週期：日 K（輪換策略固定使用日線）
           </div>
-        </div>
+        ) : (
+          <div>
+            <label className="block text-sm font-medium mb-1">K 線週期</label>
+            <div className="flex gap-2 flex-wrap">
+              {['1d', '1h', '30m', '15m', '5m', '1m'].map((v) => (
+                <button key={v} onClick={() => handleTimeframeChange(v)}
+                  className={`px-4 py-2 text-sm rounded-lg cursor-pointer ${timeframe === v ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                  {TF_LABELS[v] || v}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <div>

@@ -32,6 +32,7 @@ export function CreateInstanceForm() {
           setParams(defaults)
           setIsRotation(s.is_rotation ?? false)
           setRotationSymbols(s.rotation_symbols ?? [])
+          if (s.is_rotation) setTimeframe('1d')
         })
     } else {
       setIsRotation(false)
@@ -137,15 +138,23 @@ export function CreateInstanceForm() {
             className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">K 線週期</label>
-          <div className="flex gap-2 flex-wrap">
-            {['1d', '1h', '30m', '15m', '5m', '1m'].map((v) => (
-              <button key={v} onClick={() => setTimeframe(v)}
-                className={`px-3 py-1.5 text-sm rounded-lg cursor-pointer ${timeframe === v ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>
-                {{'1d':'日 K','1h':'小時 K','30m':'30分','15m':'15分','5m':'5分','1m':'1分'}[v] || v}
-              </button>
-            ))}
-          </div>
+          {isRotation ? (
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500">
+              K 線週期：日 K（輪換策略固定使用日線）
+            </div>
+          ) : (
+            <>
+              <label className="block text-sm font-medium mb-1">K 線週期</label>
+              <div className="flex gap-2 flex-wrap">
+                {['1d', '1h', '30m', '15m', '5m', '1m'].map((v) => (
+                  <button key={v} onClick={() => setTimeframe(v)}
+                    className={`px-3 py-1.5 text-sm rounded-lg cursor-pointer ${timeframe === v ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>
+                    {({'1d':'日 K','1h':'小時 K','30m':'30分','15m':'15分','5m':'5分','1m':'1分'} as Record<string,string>)[v] || v}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 

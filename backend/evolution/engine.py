@@ -147,7 +147,7 @@ class EvolutionEngine:
         max_gen = cfg.max_generations or EVO_SETTINGS.get_default_generations(timeframe)
         early_stop = cfg.early_stop_generations or EVO_SETTINGS.default_early_stop_generations
 
-        # Rotation strategies: always fetch their fixed symbol universe
+        # Rotation strategies: always fetch their fixed symbol universe on daily bars
         from strategies.base import get_strategy_module as _get_mod
         _mod = _get_mod(template_id)
         if _mod and getattr(_mod, "IS_ROTATION", False):
@@ -156,6 +156,7 @@ class EvolutionEngine:
             if spy_sym not in rot_syms:
                 rot_syms.append(spy_sym)
             symbols = rot_syms
+            timeframe = "1d"  # rotation indicators (SMA200, ROC63) require daily bars
         else:
             symbols = cfg.symbols
 

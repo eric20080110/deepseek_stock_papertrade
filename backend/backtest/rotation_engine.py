@@ -44,8 +44,13 @@ def run_rotation_backtest(
     rotation_symbols: Optional[list[str]] = None,
     safe_symbol: str = "BIL",
     spy_symbol: str = "SPY",
+    strategy_module=None,
 ) -> Optional[SymbolResult]:
-    from strategies.omniscient_paradox import compute_indicators, score_asset
+    if strategy_module is not None:
+        compute_indicators = strategy_module.compute_indicators
+        score_asset = strategy_module.score_asset
+    else:
+        from strategies.omniscient_paradox import compute_indicators, score_asset
 
     if rotation_symbols is None:
         from strategies.omniscient_paradox import ROTATION_SYMBOLS

@@ -5,4 +5,6 @@ STRATEGY_REGISTRY: dict[str, str] = {
     "macd_momentum": "strategies.macd_momentum",
     "always_buy": "strategies.always_buy",
     "omniscient_paradox": "strategies.omniscient_paradox",
+    "tech_momentum_rotation": "strategies.tech_momentum_rotation",
+    "mandelbrot_vol_clustering": "strategies.mandelbrot_vol_clustering",
 }
