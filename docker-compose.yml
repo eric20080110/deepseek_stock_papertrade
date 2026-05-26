@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    env_file: .env               # TURSO_URL, TURSO_TOKEN, ALPACA_*, etc.
+    environment:
+      LOCAL_DB_PATH: /app/data/quantgene_local.db
+    volumes:
+      - ./data:/app/data         # persistent SQLite + parquet cache
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"                # access at http://localhost:3000
+    depends_on:
+      - backend

@@ -21,7 +21,10 @@ def _load_dotenv():
 
 _load_dotenv()
 
-LOCAL_DB_PATH = os.path.join(os.path.dirname(__file__), "quantgene_local.db")
+LOCAL_DB_PATH = os.environ.get(
+    "LOCAL_DB_PATH",
+    os.path.join(os.path.dirname(__file__), "quantgene_local.db"),
+)
 
 TURSO_URL = os.environ.get("TURSO_URL")
 TURSO_TOKEN = os.environ.get("TURSO_TOKEN")

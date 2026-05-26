@@ -1,0 +1,27 @@
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+
+# Node / frontend build artifacts
+frontend/node_modules
+frontend/dist
+
+# Local DB files (mounted as volume at runtime)
+backend/quantgene_local.db
+backend/quantgene_local.db-shm
+backend/quantgene_local.db-wal
+backend/parquet_cache/
+
+# Secrets — never bake into image
+backend/.env
+.env
+
+# Git
+.git
+.gitignore
+
+# Misc
+**/*.log
+.DS_Store
