@@ -190,7 +190,24 @@ def resume_instance(instance_id: str):
 
 @router.get("/{instance_id}/positions")
 def get_positions(instance_id: str):
-    return []
+    from live_trading.alpaca import CONFIGURED, list_positions
+    if not CONFIGURED:
+        return []
+    try:
+        raw = list_positions()
+    except Exception:
+        return []
+    return [
+        {
+            "symbol": p.get("symbol"),
+            "side": "long" if float(p.get("qty", 0)) > 0 else "short" if float(p.get("qty", 0)) < 0 else "flat",
+            "qty": abs(float(p.get("qty", 0))),
+            "entry_price": float(p.get("avg_entry_price", 0)),
+            "current_price": float(p.get("current_price", 0)),
+            "unrealized_pnl": float(p.get("unrealized_pl", 0)),
+        }
+        for p in raw if abs(float(p.get("qty", 0))) > 0
+    ]
 
 
 @router.get("/{instance_id}/orders")

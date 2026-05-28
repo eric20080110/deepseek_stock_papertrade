@@ -459,6 +459,15 @@ CREATE TABLE IF NOT EXISTS live_instances (
     max_position_size_pct REAL,
     last_executed_date  TEXT
 );
+CREATE TABLE IF NOT EXISTS live_positions (
+    symbol          TEXT NOT NULL,
+    side            TEXT DEFAULT 'flat',
+    qty             REAL DEFAULT 0,
+    entry_price     REAL DEFAULT 0,
+    current_price   REAL DEFAULT 0,
+    unrealized_pnl  REAL DEFAULT 0,
+    PRIMARY KEY (symbol)
+);
 CREATE TABLE IF NOT EXISTS live_orders (
     order_id        TEXT PRIMARY KEY,
     instance_id     TEXT NOT NULL,
@@ -596,6 +605,15 @@ CREATE TABLE IF NOT EXISTS live_instances (
     max_daily_loss_pct  REAL,
     max_position_size_pct REAL,
     last_executed_date  TEXT
+);
+CREATE TABLE IF NOT EXISTS live_positions (
+    symbol          TEXT NOT NULL,
+    side            TEXT DEFAULT 'flat',
+    qty             REAL DEFAULT 0,
+    entry_price     REAL DEFAULT 0,
+    current_price   REAL DEFAULT 0,
+    unrealized_pnl  REAL DEFAULT 0,
+    PRIMARY KEY (symbol)
 );
 CREATE TABLE IF NOT EXISTS live_orders (
     order_id        TEXT PRIMARY KEY,
