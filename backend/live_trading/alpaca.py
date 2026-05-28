@@ -12,6 +12,9 @@ def _config():
     key = os.environ.get("ALPACA_API_KEY", "")
     secret = os.environ.get("ALPACA_API_SECRET", "")
     base = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets").rstrip("/")
+    # Strip /v2 if user included it in the base URL to avoid double pathing
+    if base.endswith("/v2"):
+        base = base[:-3]
     return key, secret, base
 
 
@@ -45,12 +48,12 @@ def _request(method: str, path: str, body: Optional[dict] = None, timeout: int =
         r = requests.request(method, url, json=body, headers=_headers(), timeout=timeout)
         if r.status_code >= 400:
             details = r.text[:300]
-            logger.warning("Alpaca HTTP %d on %s %s: %s", r.status_code, method, path, details)
-            raise AlpacaError(f"HTTP {r.status_code}: {details}", r.status_code)
+            logger.warning("Alpaca HTTP %d on %s: %s", r.status_code, url, details)
+            raise AlpacaError(f"HTTP {r.status_code} on {url}: {details}", r.status_code)
         return r.json()
     except requests.RequestException as e:
-        logger.warning("Alpaca request failed %s %s: %s", method, path, e)
-        raise AlpacaError(str(e))
+        logger.warning("Alpaca request failed %s: %s", url, e)
+        raise AlpacaError(f"{url}: {e}")
 
 
 def submit_order(symbol: str, side: str, qty: float, order_type: str = "market",
