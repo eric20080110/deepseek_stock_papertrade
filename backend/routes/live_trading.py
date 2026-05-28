@@ -4,8 +4,16 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
-from database import get_db
+from database import get_turso as _get_turso, get_db as _get_local
 from live_trading.models import CreateLiveInstanceRequest, LiveInstance, LiveOrder, LivePosition, LiveStatus, OrderStatus
+
+
+def get_db():
+    """Try Turso first (prod), fall back to local SQLite (dev)."""
+    try:
+        return _get_turso()
+    except Exception:
+        return _get_local()
 
 router = APIRouter(prefix="/live-trading", tags=["live_trading"])
 

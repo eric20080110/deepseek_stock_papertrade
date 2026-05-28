@@ -172,8 +172,11 @@ export function InstanceDetail({ instanceId }: Props) {
           )}
           <button onClick={async () => {
             if (!confirm(`將 "${instance.name}" 複製到實盤跑盤？`)) return
-            await fetch('/live-trading/from-paper/' + instance.instance_id, { method: 'POST' })
-            window.location.reload()
+            try {
+              const r = await fetch('/live-trading/from-paper/' + instance.instance_id, { method: 'POST' })
+              if (!r.ok) { const e = await r.json(); alert('轉入失敗：' + (e.detail || r.statusText)); return }
+              window.location.reload()
+            } catch (e: any) { alert('轉入失敗：' + e.message) }
           }}
             className="px-3 py-1.5 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer">轉入實盤</button>
           <button onClick={instance.status === 'STOPPED' ? handleDelete : handleStop}
