@@ -80,6 +80,10 @@ def run_rotation_backtest(
     _plog(f"compute_indicators: {_ind_end-_ind_start:.3f}s "
           f"for {len(risk_symbols)} symbols n_bars={len(idx)}")
 
+    # Batch ML prediction: precompute probabilities for all bars at once
+    if strategy_module is not None and hasattr(strategy_module, 'batch_predict'):
+        strategy_module.batch_predict(indicators, risk_symbols, safe_symbol, params)
+
     # SPY SMA200 for market regime
     spy_sma_period = int(params.get("spy_sma_period", 200))
     if has_spy:

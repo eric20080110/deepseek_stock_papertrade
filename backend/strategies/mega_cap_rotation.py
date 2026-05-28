@@ -14,6 +14,7 @@ _close_cache: dict[str, np.ndarray] = {}
 _model: RandomForestClassifier | None = None
 _scaler: StandardScaler | None = None
 _trained: bool = False
+_qqq_ret_10d: np.ndarray | None = None
 
 
 _train_count: int = 0
@@ -79,39 +80,55 @@ def compute_indicators(close_arr: np.ndarray, symbol: str, params: dict) -> dict
     ret_10d = np.full(len(close_arr), np.nan)
     if len(close_arr) >= 11:
         ret_10d = pd.Series(close_arr).pct_change(10).values
+
+    global _qqq_ret_10d
+    if symbol == SAFE_SYMBOL:
+        _qqq_ret_10d = ret_10d.copy()
+
     return {"ret_10d": ret_10d, "close": close_arr}
+
+
+def batch_predict(indicators: dict, risk_symbols: list[str], safe_symbol: str, params: dict):
+    global _model, _scaler, _trained
+
+    if not _trained:
+        _train_model(params)
+    if _model is None or _scaler is None or not _trained:
+        return
+
+    global _qqq_ret_10d
+    if _qqq_ret_10d is None:
+        return
+
+    n = len(next(iter(indicators.values()))["ret_10d"])
+    max_bars = min(n, len(_qqq_ret_10d))
+
+    for sym in risk_symbols:
+        ind = indicators[sym]
+        ret_10d = ind["ret_10d"]
+        active_ret = ret_10d[:max_bars] - _qqq_ret_10d[:max_bars]
+        features = np.column_stack([ret_10d[:max_bars], active_ret])
+
+        valid = ~(np.isnan(features[:, 0]) | np.isnan(features[:, 1]))
+        probs = np.full(max_bars, np.nan, dtype=np.float64)
+        if valid.any():
+            probs[valid] = _model.predict_proba(
+                _scaler.transform(features[valid])
+            )[:, 1]
+
+        ind["probs"] = probs
 
 
 _score_count: int = 0
 _score_total_s: float = 0.0
 
 def score_asset(ind: dict, symbol: str, close: float, i: int, params: dict) -> float:
-    global _model, _scaler, _trained, _score_count, _score_total_s
-
-    if not _trained:
-        _train_model(params)
-
-    if _model is None or _scaler is None or not _trained:
+    probs = ind.get("probs")
+    if probs is None or i >= len(probs):
         return float("nan")
-
-    ret_10d = ind["ret_10d"][i]
-    if np.isnan(ret_10d):
+    prob = probs[i]
+    if np.isnan(prob):
         return float("nan")
-
-    qqq_arr = _close_cache.get(SAFE_SYMBOL)
-    if qqq_arr is None or i >= len(qqq_arr):
-        return float("nan")
-    q_ret_10d = pd.Series(qqq_arr).pct_change(10).values[i]
-    if np.isnan(q_ret_10d):
-        return float("nan")
-
-    _s0 = time.perf_counter()
-    active_ret = ret_10d - q_ret_10d
-    feat = _scaler.transform([[ret_10d, active_ret]])
-    probs = _model.predict_proba(feat)[0]
-    prob = probs[1] if len(probs) > 1 else (probs[0] if _model.classes_[0] == 1 else 0.0)
-    _score_count += 1
-    _score_total_s += time.perf_counter() - _s0
 
     min_confidence = float(params.get("min_confidence", 0.70))
     if prob > min_confidence:
