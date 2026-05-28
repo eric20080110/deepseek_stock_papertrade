@@ -1,6 +1,7 @@
+import json
 from enum import Enum
-from typing import Optional
-from pydantic import BaseModel
+from typing import Optional, List, Any
+from pydantic import BaseModel, Field
 
 
 class LiveStatus(str, Enum):
@@ -8,16 +9,27 @@ class LiveStatus(str, Enum):
     RUNNING = "RUNNING"
     PAUSED = "PAUSED"
     STOPPED = "STOPPED"
-    FAILED = "FAILED"
+    ERROR = "ERROR"
 
 
 class OrderStatus(str, Enum):
     PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
     FILLED = "FILLED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
-    CANCELLED = "CANCELLED"
+    CANCELED = "CANCELED"
     REJECTED = "REJECTED"
-    FAILED = "FAILED"
+
+
+class OrderSide(str, Enum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+class OrderType(str, Enum):
+    MARKET = "market"
+    LIMIT = "limit"
+    STOP = "stop"
 
 
 class LiveInstance(BaseModel):
@@ -25,22 +37,25 @@ class LiveInstance(BaseModel):
     name: str
     strategy_config_id: str
     params_json: str
-    symbols: str
-    initial_capital: float = 10000.0
-    status: LiveStatus = LiveStatus.INITIALIZING
-    started_at: int = 0
+    symbols: Any
+    initial_capital: float
+    status: LiveStatus
+    started_at: int
     stopped_at: Optional[int] = None
-    timeframe: str = "1d"
-    total_equity: float = 0.0
-    total_return: float = 0.0
-    unrealized_pnl: float = 0.0
-    realized_pnl: float = 0.0
-    trade_count: int = 0
-    win_rate: float = 0.0
-    max_drawdown: float = 0.0
-    schedule_time: str = "16:30"
+    timeframe: str
+    total_equity: Optional[float] = None
+    total_return: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    realized_pnl: Optional[float] = None
+    trade_count: Optional[int] = None
+    win_rate: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    schedule_time: Optional[str] = None
     max_daily_loss_pct: Optional[float] = None
     max_position_size_pct: Optional[float] = None
+
+    class Config:
+        from_attributes = True
 
 
 class LiveOrder(BaseModel):
@@ -48,33 +63,52 @@ class LiveOrder(BaseModel):
     instance_id: str
     symbol: str
     side: str
-    order_type: str = "market"
+    order_type: str
     qty: float
-    status: OrderStatus
-    filled_qty: float = 0.0
-    filled_avg_price: float = 0.0
+    status: str
+    created_at: int
+    updated_at: int
+    limit_price: Optional[float] = None
+    stop_price: Optional[float] = None
+    filled_qty: Optional[float] = None
+    filled_avg_price: Optional[float] = None
     alpaca_order_id: Optional[str] = None
-    created_at: int = 0
-    updated_at: int = 0
     reason: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 
 class LivePosition(BaseModel):
+    instance_id: str
     symbol: str
-    side: str = "flat"
-    qty: float = 0.0
-    entry_price: float = 0.0
-    current_price: float = 0.0
-    unrealized_pnl: float = 0.0
+    side: str
+    qty: float
+    entry_price: float
+    current_price: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    market_value: Optional[float] = None
+    cost_basis: Optional[float] = None
+    change_pct: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CreateManualOrderRequest(BaseModel):
+    symbol: str
+    side: OrderSide
+    order_type: Optional[OrderType] = OrderType.MARKET
+    qty: float = Field(gt=0, description="Order quantity (positive)")
 
 
 class CreateLiveInstanceRequest(BaseModel):
     name: str
     strategy_config_id: str
     params: dict = {}
-    symbols: list[str] = []
-    initial_capital: float = 10000.0
-    timeframe: str = "1d"
+    symbols: List[str]
+    initial_capital: float
+    timeframe: str
     schedule_time: str = "16:30"
     max_daily_loss_pct: Optional[float] = None
     max_position_size_pct: Optional[float] = None

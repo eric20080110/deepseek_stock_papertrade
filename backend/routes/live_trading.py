@@ -5,11 +5,10 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
 from database import get_turso as _get_turso, get_db as _get_local
-from live_trading.models import CreateLiveInstanceRequest, LiveInstance, LiveOrder, LivePosition, LiveStatus, OrderStatus
+from live_trading.models import CreateLiveInstanceRequest, CreateManualOrderRequest, LiveInstance, LiveOrder, LivePosition, LiveStatus, OrderStatus
 
 
 def get_db():
-    """Try Turso first (prod), fall back to local SQLite (dev)."""
     try:
         return _get_turso()
     except Exception:
@@ -85,9 +84,7 @@ def render_status():
 @router.get("")
 def list_instances():
     db = get_db()
-    rows = db.execute(
-        "SELECT * FROM live_instances ORDER BY started_at DESC"
-    ).fetchall()
+    rows = db.execute("SELECT * FROM live_instances ORDER BY started_at DESC").fetchall()
     db.close()
     return [_row_to_instance(r).model_dump() for r in rows]
 
@@ -103,18 +100,12 @@ def create_instance(req: CreateLiveInstanceRequest):
             initial_capital, status, started_at, timeframe, schedule_time,
             max_daily_loss_pct, max_position_size_pct)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            instance_id, req.name, req.strategy_config_id,
-            json.dumps(req.params), json.dumps(req.symbols),
-            req.initial_capital, LiveStatus.INITIALIZING.value, now,
-            req.timeframe, req.schedule_time,
-            req.max_daily_loss_pct, req.max_position_size_pct,
-        ),
+        (instance_id, req.name, req.strategy_config_id, json.dumps(req.params),
+         json.dumps(req.symbols), req.initial_capital, LiveStatus.INITIALIZING.value,
+         now, req.timeframe, req.schedule_time, req.max_daily_loss_pct, req.max_position_size_pct),
     )
     db.commit()
-    row = db.execute(
-        "SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)
-    ).fetchone()
+    row = db.execute("SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)).fetchone()
     db.close()
     return _row_to_instance(row).model_dump()
 
@@ -122,13 +113,10 @@ def create_instance(req: CreateLiveInstanceRequest):
 @router.post("/from-paper/{paper_instance_id}")
 def promote_from_paper(paper_instance_id: str):
     db = get_db()
-    paper = db.execute(
-        "SELECT * FROM paper_instances WHERE instance_id = ?", (paper_instance_id,)
-    ).fetchone()
+    paper = db.execute("SELECT * FROM paper_instances WHERE instance_id = ?", (paper_instance_id,)).fetchone()
     if not paper:
         db.close()
         raise HTTPException(404, "Paper trading instance not found")
-
     instance_id = str(uuid.uuid4())
     now = int(time.time())
     db.execute(
@@ -136,23 +124,12 @@ def promote_from_paper(paper_instance_id: str):
            (instance_id, name, strategy_config_id, params_json, symbols,
             initial_capital, status, started_at, timeframe, schedule_time)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            instance_id,
-            paper["name"] + " (實盤)",
-            paper["strategy_config_id"],
-            paper["params_json"],
-            paper["symbols"],
-            paper["initial_capital"],
-            LiveStatus.INITIALIZING.value,
-            now,
-            paper["timeframe"],
-            "16:30",
-        ),
+        (instance_id, paper["name"] + " (實盤)", paper["strategy_config_id"],
+         paper["params_json"], paper["symbols"], paper["initial_capital"],
+         LiveStatus.INITIALIZING.value, now, paper["timeframe"], "16:30"),
     )
     db.commit()
-    row = db.execute(
-        "SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)
-    ).fetchone()
+    row = db.execute("SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)).fetchone()
     db.close()
     return _row_to_instance(row).model_dump()
 
@@ -160,9 +137,7 @@ def promote_from_paper(paper_instance_id: str):
 @router.get("/{instance_id}")
 def get_instance(instance_id: str):
     db = get_db()
-    row = db.execute(
-        "SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)
-    ).fetchone()
+    row = db.execute("SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)).fetchone()
     db.close()
     if not row:
         raise HTTPException(404, "Instance not found")
@@ -172,9 +147,7 @@ def get_instance(instance_id: str):
 @router.delete("/{instance_id}")
 def stop_instance(instance_id: str, purge: bool = Query(False)):
     db = get_db()
-    row = db.execute(
-        "SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)
-    ).fetchone()
+    row = db.execute("SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)).fetchone()
     if not row:
         db.close()
         raise HTTPException(404, "Instance not found")
@@ -184,6 +157,16 @@ def stop_instance(instance_id: str, purge: bool = Query(False)):
         db.execute("DELETE FROM live_instances WHERE instance_id = ?", (instance_id,))
     else:
         now = int(time.time())
+        # Close all Alpaca positions for this instance's symbols
+        symbols = json.loads(row["symbols"])
+        if symbols:
+            from live_trading.alpaca import configured as alpaca_configured, close_position
+            if alpaca_configured():
+                for sym in symbols:
+                    try:
+                        close_position(sym)
+                    except Exception:
+                        pass
         db.execute(
             "UPDATE live_instances SET status = ?, stopped_at = ? WHERE instance_id = ?",
             (LiveStatus.STOPPED.value, now, instance_id),
@@ -234,6 +217,9 @@ def get_positions(instance_id: str):
             "entry_price": float(p.get("avg_entry_price", 0)),
             "current_price": float(p.get("current_price", 0)),
             "unrealized_pnl": float(p.get("unrealized_pl", 0)),
+            "market_value": float(p.get("market_value", 0)),
+            "cost_basis": float(p.get("cost_basis", 0)),
+            "change_pct": float(p.get("unrealized_plpc", 0)) * 100,
         }
         for p in raw if abs(float(p.get("qty", 0))) > 0
     ]
@@ -243,8 +229,77 @@ def get_positions(instance_id: str):
 def get_orders(instance_id: str):
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM live_orders WHERE instance_id = ? ORDER BY created_at DESC",
-        (instance_id,),
+        "SELECT * FROM live_orders WHERE instance_id = ? ORDER BY created_at DESC", (instance_id,)
     ).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+
+@router.post("/{instance_id}/orders")
+def create_manual_order(instance_id: str, req: CreateManualOrderRequest):
+    db = get_db()
+    inst = db.execute("SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)).fetchone()
+    if not inst:
+        db.close()
+        raise HTTPException(404, "Instance not found")
+    now = int(time.time())
+    order_id = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO live_orders (order_id, instance_id, symbol, side, order_type, qty, status, created_at, updated_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (order_id, instance_id, req.symbol, req.side, req.order_type or "market",
+         req.qty, "PENDING", now, now, json.dumps({"action": "manual", "source": "user"})),
+    )
+    db.commit()
+    db.close()
+    return {"order_id": order_id}
+
+
+@router.post("/{instance_id}/orders/{order_id}/cancel")
+def cancel_order(instance_id: str, order_id: str):
+    from live_trading.alpaca import configured as alpaca_configured, cancel_order as alpaca_cancel
+    db = get_db()
+    order = db.execute(
+        "SELECT * FROM live_orders WHERE order_id = ? AND instance_id = ?", (order_id, instance_id)
+    ).fetchone()
+    if not order:
+        db.close()
+        raise HTTPException(404, "Order not found")
+    if order["status"] != "PENDING":
+        db.close()
+        raise HTTPException(400, f"Cannot cancel order with status {order['status']}")
+    now = int(time.time())
+    # If already submitted to Alpaca, cancel on Alpaca too
+    if order["alpaca_order_id"] and alpaca_configured():
+        try:
+            alpaca_cancel(order["alpaca_order_id"])
+        except Exception:
+            pass
+    db.execute(
+        "UPDATE live_orders SET status = ?, updated_at = ?, reason = ? WHERE order_id = ?",
+        ("CANCELLED", now, json.dumps({"action": "cancelled", "source": "user"}), order_id),
+    )
+    db.commit()
+    db.close()
+    return {"detail": "ok"}
+
+
+@router.post("/{instance_id}/flatten")
+def flatten_positions(instance_id: str):
+    from live_trading.alpaca import configured as alpaca_configured, close_position
+    if not alpaca_configured():
+        raise HTTPException(400, "Alpaca not configured")
+    db = get_db()
+    inst = db.execute("SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)).fetchone()
+    if not inst:
+        db.close()
+        raise HTTPException(404, "Instance not found")
+    symbols = json.loads(inst["symbols"]) if isinstance(inst["symbols"], str) else inst["symbols"]
+    results = []
+    for sym in symbols:
+        try:
+            r = close_position(sym)
+            results.append({"symbol": sym, "result": "ok" if r else "failed"})
+        except Exception as e:
+            results.append({"symbol": sym, "result": str(e)})
+    db.close()
+    return {"results": results}
