@@ -37,8 +37,8 @@ def _row_to_instance(row) -> LiveInstance:
 
 @router.get("/account")
 def account_info():
-    from live_trading.alpaca import get_account, CONFIGURED
-    if not CONFIGURED:
+    from live_trading.alpaca import get_account, configured as alpaca_configured, AlpacaError
+    if not alpaca_configured():
         return {"connected": False, "reason": "not_configured"}
     try:
         acct = get_account()
@@ -52,8 +52,8 @@ def account_info():
             "status": acct.get("status", ""),
             "currency": acct.get("currency", "USD"),
         }
-    except Exception as e:
-        return {"connected": False, "reason": str(e)}
+    except AlpacaError as e:
+        return {"connected": False, "reason": e.message, "status_code": e.status_code}
 
 
 @router.get("/render-status")
@@ -211,8 +211,8 @@ def resume_instance(instance_id: str):
 
 @router.get("/{instance_id}/positions")
 def get_positions(instance_id: str):
-    from live_trading.alpaca import CONFIGURED, list_positions
-    if not CONFIGURED:
+    from live_trading.alpaca import configured as alpaca_configured, list_positions
+    if not alpaca_configured():
         return []
     try:
         raw = list_positions()

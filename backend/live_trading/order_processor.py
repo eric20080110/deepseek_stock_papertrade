@@ -4,7 +4,7 @@ import logging
 import time
 
 from database import get_db
-from live_trading.alpaca import CONFIGURED as ALPACA_CONFIGURED, submit_order, get_order
+from live_trading.alpaca import configured as alpaca_configured, submit_order, get_order
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class LiveOrderProcessor:
             return
         self._running = True
         self._task = asyncio.create_task(self._loop())
-        logger.info("LiveOrderProcessor started (Alpaca configured: %s)", ALPACA_CONFIGURED)
+        logger.info("LiveOrderProcessor started (Alpaca configured: %s)", alpaca_configured())
 
     async def stop(self):
         self._running = False
@@ -42,7 +42,7 @@ class LiveOrderProcessor:
             await asyncio.sleep(30)
 
     def _process_orders(self):
-        if not ALPACA_CONFIGURED:
+        if not alpaca_configured():
             return
 
         db = get_db()

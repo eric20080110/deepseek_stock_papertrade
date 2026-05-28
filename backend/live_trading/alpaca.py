@@ -1,44 +1,56 @@
 import json
 import logging
 import os
-import time
-import urllib.request
-import urllib.error
 from typing import Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
-API_KEY = os.environ.get("ALPACA_API_KEY", "")
-API_SECRET = os.environ.get("ALPACA_API_SECRET", "")
-BASE_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets").rstrip("/")
 
-CONFIGURED = bool(API_KEY and API_SECRET)
+def _config():
+    key = os.environ.get("ALPACA_API_KEY", "")
+    secret = os.environ.get("ALPACA_API_SECRET", "")
+    base = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets").rstrip("/")
+    return key, secret, base
+
+
+def configured() -> bool:
+    k, s, _ = _config()
+    return bool(k and s)
 
 
 def _headers() -> dict:
+    k, s, _ = _config()
     return {
-        "APCA-API-KEY-ID": API_KEY,
-        "APCA-API-SECRET-KEY": API_SECRET,
+        "APCA-API-KEY-ID": k,
+        "APCA-API-SECRET-KEY": s,
         "Content-Type": "application/json",
     }
 
 
+class AlpacaError(Exception):
+    def __init__(self, message: str, status_code: int = 0):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
+
+
 def _request(method: str, path: str, body: Optional[dict] = None, timeout: int = 10) -> Optional[dict]:
-    if not CONFIGURED:
+    if not configured():
         return None
-    url = f"{BASE_URL}{path}"
-    data = json.dumps(body).encode("utf-8") if body else None
-    req = urllib.request.Request(url, data=data, headers=_headers(), method=method)
+    _, _, base = _config()
+    url = f"{base}{path}"
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        logger.warning("Alpaca HTTP %d on %s %s: %s", e.code, method, path, body)
-        return None
-    except Exception as e:
+        r = requests.request(method, url, json=body, headers=_headers(), timeout=timeout)
+        if r.status_code >= 400:
+            details = r.text[:300]
+            logger.warning("Alpaca HTTP %d on %s %s: %s", r.status_code, method, path, details)
+            raise AlpacaError(f"HTTP {r.status_code}: {details}", r.status_code)
+        return r.json()
+    except requests.RequestException as e:
         logger.warning("Alpaca request failed %s %s: %s", method, path, e)
-        return None
+        raise AlpacaError(str(e))
 
 
 def submit_order(symbol: str, side: str, qty: float, order_type: str = "market",
