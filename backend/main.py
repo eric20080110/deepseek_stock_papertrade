@@ -23,6 +23,7 @@ from routes.paper_trading import engine as paper_engine
 from routes.paper_trading import set_event_loop as set_pt_event_loop
 from routes.gene_pool import router as gene_pool_router
 from routes.symbols import router as symbols_router
+from routes.live_trading import router as live_trading_router
 from paper_trading.ticker import PaperTicker
 
 ticker = PaperTicker(paper_engine)
@@ -60,6 +61,7 @@ app.include_router(analysis_router)
 app.include_router(paper_trading_router)
 app.include_router(gene_pool_router)
 app.include_router(symbols_router)
+app.include_router(live_trading_router)
 
 
 @app.get("/health")

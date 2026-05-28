@@ -72,6 +72,7 @@ class CreateLiveInstanceRequest(BaseModel):
     name: str
     strategy_config_id: str
     params: dict = {}
+    symbols: list[str] = []
     initial_capital: float = 10000.0
     timeframe: str = "1d"
     schedule_time: str = "16:30"
