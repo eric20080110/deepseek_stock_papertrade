@@ -30,7 +30,7 @@ def _wilder_rsi(close: np.ndarray, period: int) -> np.ndarray:
     return rsi
 
 
-def compute_indicators(close_arr: np.ndarray, params: dict) -> dict:
+def compute_indicators(close_arr: np.ndarray, symbol: str, params: dict) -> dict:
     """Compute all indicators for one symbol. Returns dict of numpy arrays."""
     s = pd.Series(close_arr)
     fast_p = int(params.get("roc_fast_period", 9))
@@ -54,7 +54,7 @@ def compute_indicators(close_arr: np.ndarray, params: dict) -> dict:
     }
 
 
-def score_asset(ind: dict, close: float, i: int, params: dict) -> float:
+def score_asset(ind: dict, symbol: str, close: float, i: int, params: dict) -> float:
     """Return composite score for asset at bar i. Returns nan if indicators not ready."""
     fast = ind["roc_fast"][i]
     med  = ind["roc_med"][i]

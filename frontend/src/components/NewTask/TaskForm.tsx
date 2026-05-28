@@ -35,7 +35,7 @@ export function TaskForm() {
   const [earlyStop, setEarlyStop] = useState(10)
   const [advanced, setAdvanced] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [estimate, setEstimate] = useState<{ estimated_seconds: number; time_per_gen_sec: number } | null>(null)
+  const [estimate, setEstimate] = useState<{ estimated_seconds: number; expected_seconds: number; time_per_gen_sec: number } | null>(null)
   const [estimating, setEstimating] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [isRotation, setIsRotation] = useState(false)
@@ -52,8 +52,7 @@ export function TaskForm() {
 
   useEffect(() => {
     api.listStrategies().then((s) => {
-      const userStrategies = s.filter((x) => !x.is_template)
-      setStrategies(userStrategies)
+      setStrategies(s)
       if (retryConfig) {
         setStrategyId(retryConfig.strategy_config_id)
         setSymbols(retryConfig.symbols)
@@ -90,6 +89,7 @@ export function TaskForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          strategy_config_id: strategyId,
           symbols, start_date: startDate, end_date: endDate,
           timeframe, population_size: popSize, max_generations: maxGens,
         }),
@@ -166,9 +166,16 @@ export function TaskForm() {
             className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">選擇策略...</option>
-            {strategies.map((s) => (
+            {strategies.filter(s => !s.is_template).map((s) => (
               <option key={s.config_id} value={s.config_id}>{s.name}</option>
             ))}
+            {strategies.some(s => s.is_template) && (
+              <optgroup label="─ 系統模板 ─">
+                {strategies.filter(s => s.is_template).map((s) => (
+                  <option key={s.config_id} value={s.config_id}>{s.name}（模板）</option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
 
@@ -299,9 +306,15 @@ export function TaskForm() {
                       <span>{formatDuration(Math.round(estimate.time_per_gen_sec))}</span>
                     </div>
                     <div className="flex justify-between font-semibold">
-                      <span>總預估時間</span>
+                      <span>最長（跑滿世代）</span>
                       <span className={estimate.estimated_seconds > 7200 ? 'text-amber-600' : 'text-emerald-600'}>
                         {formatDuration(estimate.estimated_seconds)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>預估（提前停止）</span>
+                      <span className="text-blue-600">
+                        ≈ {formatDuration(estimate.expected_seconds)}
                       </span>
                     </div>
                   </>

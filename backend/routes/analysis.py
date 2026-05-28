@@ -265,6 +265,7 @@ def individual_equity_curve(
         ed = config.end_date if config else ""
         tf = config.timeframe if config else "1d"
         symbols = list(result.get("symbol_curves", {}).keys()) or (config.symbols if config else [])
+        symbols = [s for s in symbols if s != "ROTATION_PORTFOLIO"]
         prices_dates = {sym: _ohlcv_prices(sym, sd, ed, tf) for sym in symbols}
         result["symbol_prices"] = {sym: pd[0] for sym, pd in prices_dates.items()}
         if not result.get("dates"):

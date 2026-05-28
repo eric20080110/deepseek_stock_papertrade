@@ -1,9 +1,30 @@
 import type { EvolutionTask } from '../../types/evolution'
 import { useTaskStore } from '../../store/taskStore'
-import { useState } from 'react'
-import { Trash2, Pencil, Check, X } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Trash2, Pencil, Check, X, Clock } from 'lucide-react'
 import { toast } from '../../lib/toast'
 import { ConfirmModal } from '../ConfirmModal'
+
+function formatDuration(sec: number): string {
+  if (sec < 60) return `${sec} 秒`
+  if (sec < 3600) return `${Math.round(sec / 60)} 分 ${sec % 60} 秒`
+  const h = Math.floor(sec / 3600)
+  const m = Math.round((sec % 3600) / 60)
+  return `${h} 時 ${m} 分`
+}
+
+function useElapsed(task: EvolutionTask): number {
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
+  useEffect(() => {
+    if (task.status !== 'RUNNING') return
+    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [task.status, task.task_id])
+  if (task.status === 'RUNNING' && task.started_at) return now - task.started_at
+  if (task.status === 'COMPLETED' && task.started_at && task.completed_at) return task.completed_at - task.started_at
+  if ((task.status === 'FAILED' || task.status === 'CANCELLED') && task.started_at && task.completed_at) return task.completed_at - task.started_at
+  return 0
+}
 
 const statusConfig: Record<string, { color: string; label: string }> = {
   QUEUED: { color: 'bg-gray-400', label: '排隊中' },
@@ -20,6 +41,7 @@ interface Props {
 
 export function TaskCard({ task, onRefresh }: Props) {
   const cfg = statusConfig[task.status]
+  const elapsed = useElapsed(task)
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
   const setSelectedAnalysisTaskId = useTaskStore((s) => s.setSelectedAnalysisTaskId)
   const triggerDbStatusRefresh = useTaskStore((s) => s.triggerDbStatusRefresh)
@@ -101,6 +123,12 @@ export function TaskCard({ task, onRefresh }: Props) {
           <span>{task.config.timeframe}</span>
           <span>{task.config.symbols.length} 標的</span>
           <span>{task.config.population_size || '?'}×{task.config.max_generations || '?'}</span>
+          {elapsed > 0 && (
+            <span className="flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              {formatDuration(elapsed)}
+            </span>
+          )}
         </div>
         {task.status === 'FAILED' && task.error_message && (
           <div className="text-xs text-red-500 mt-1 truncate">{task.error_message}</div>

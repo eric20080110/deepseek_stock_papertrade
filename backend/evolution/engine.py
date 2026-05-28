@@ -3,6 +3,8 @@ import time
 import pandas as pd
 from typing import Optional
 
+from profile_helper import log as _plog
+
 from param_space.space import ParameterSpace
 from models import (
     ContinuousParam, IntegerParam, CategoricalParam, BooleanParam,
@@ -161,6 +163,7 @@ class EvolutionEngine:
             symbols = cfg.symbols
 
         data_map = {}
+        _t0 = time.perf_counter()
         for sym in symbols:
             df = DATA_CACHE.ensure(
                 sym,
@@ -171,6 +174,8 @@ class EvolutionEngine:
             if df is not None:
                 DATA_CACHE.store(sym, df, timeframe=timeframe)
                 data_map[sym] = df
+        _t1 = time.perf_counter()
+        _plog(f"Data fetch for {len(symbols)} symbols: {_t1-_t0:.2f}s")
 
         if not data_map:
             self.task_manager.fail_task(task_id, "No data available for any symbol")
@@ -199,9 +204,15 @@ class EvolutionEngine:
         prev_front: list[dict] = []
         stagnant_count = 0
 
-        for gen in range(max_gen):
-            gen_start = time.time()
+        pool_total = 0.0
+        score_total = 0.0
+        save_total = 0.0
+        select_total = 0.0
 
+        for gen in range(max_gen):
+            gen_start = time.perf_counter()
+
+            _t0 = time.perf_counter()
             results = ParallelScheduler().run_backtests(
                 individuals=pop,
                 strategy_id=strategy_id,
@@ -211,6 +222,8 @@ class EvolutionEngine:
                 walk_data_maps=walk_windows if len(walk_windows) > 1 else None,
                 on_progress=lambda i, t: on_progress(gen + 1, i, t) if on_progress else None,
             )
+            _t1 = time.perf_counter()
+            pool_total += _t1 - _t0
 
             if not results:
                 self.task_manager.fail_task(task_id, "All backtests failed")
@@ -247,7 +260,10 @@ class EvolutionEngine:
                         "max_drawdown": 0,
                     })
 
+            _t2 = time.perf_counter()
             scores, summary = score_individuals(is_metrics, oos_metrics)
+            _t3 = time.perf_counter()
+            score_total += _t3 - _t2
 
             survived = [s for s in scores if s.pareto_rank is not None]
             front = [s for s in survived if s.pareto_rank == 1]
@@ -282,10 +298,13 @@ class EvolutionEngine:
                     "equity_timestamps": wm.get("equity_timestamps", []),
                     "symbol_results": res_item.get("symbol_results", {}),
                 })
+            _t4 = time.perf_counter()
             self.task_manager.save_individuals(task_id, gen + 1, ind_records)
             self.task_manager.save_pareto_front(task_id, gen + 1, front_data)
+            _t5 = time.perf_counter()
+            save_total += _t5 - _t4
 
-            gen_dur = time.time() - gen_start
+            gen_dur = time.perf_counter() - gen_start
             gen_result = GenerationResult(
                 generation=gen + 1,
                 total_generations=max_gen,
@@ -343,6 +362,7 @@ class EvolutionEngine:
                 operators.reset_stats()
                 continue
 
+            _t6 = time.perf_counter()
             pool_size = int(pop_size * cfg.parent_pool_ratio)
             parent_pool = operators.tournament_select(survived, pool_size)
 
@@ -356,6 +376,13 @@ class EvolutionEngine:
             offspring = operators.produce_offspring(parent_pool, parent_params, remaining)
             pop = elite_params + offspring
             operators.reset_stats()
+            _t7 = time.perf_counter()
+            select_total += _t7 - _t6
+
+        _plog(f"Task {task_id}: "
+              f"backtests={pool_total:.1f}s scoring={score_total:.1f}s "
+              f"save={save_total:.1f}s select={select_total:.1f}s "
+              f"total_per_gen={(pool_total+score_total+save_total+select_total)/max(gen+1,1):.2f}s/gen")
 
         task = self.task_manager.get_task(task_id)
         if task and task.status == "CANCELLED":

@@ -1,7 +1,10 @@
 import uuid
+import time
 import numpy as np
 import pandas as pd
 from multiprocessing import Pool, set_start_method
+
+from profile_helper import log as _plog
 from functools import partial
 from typing import Optional
 
@@ -88,6 +91,7 @@ def _run_on_window(params: dict, symbols: list[str], sid: str, icap: float,
 def _run_one_rotation(params: dict, sid: str, icap: float) -> Optional[dict]:
     from strategies.base import get_strategy_module
     from backtest.rotation_engine import run_rotation_backtest
+    _t0 = time.perf_counter()
     mod = get_strategy_module(sid)
     rot_symbols = list(getattr(mod, "ROTATION_SYMBOLS", []))
     safe_sym = getattr(mod, "SAFE_SYMBOL", "BIL")
@@ -121,6 +125,10 @@ def _run_one_rotation(params: dict, sid: str, icap: float) -> Optional[dict]:
         "equity_curve": result.equity_curve,
         "equity_timestamps": result.equity_timestamps,
     }
+    _t1 = time.perf_counter()
+    _plog(f"rotation backtest {_t1-_t0:.2f}s "
+          f"n_bars={len(result.equity_curve)} trades={result.trade_count}")
+
     # Rotation strategies use the full dataset (SMA200 warm-up requires full history).
     # Pass IS metrics as OOS proxy so OOS consistency check doesn't eliminate all individuals.
     return {
@@ -207,12 +215,16 @@ class ParallelScheduler:
         walk_maps = walk_data_maps or [(data_map, oos_data_map or {})]
 
         if self.max_workers > 1 and len(individuals) > 1:
+            _t0 = time.perf_counter()
             with Pool(
                 self.max_workers,
                 initializer=_init_worker,
                 initargs=(strategy_id, symbols, data_map, initial_capital, oos_data_map, walk_maps),
             ) as pool:
                 results = pool.map(_run_one, individuals)
+            _t1 = time.perf_counter()
+            _plog(f"Pool gen: {_t1-_t0:.2f}s for {len(individuals)} individuals "
+                  f"({self.max_workers} workers)")
             if on_progress:
                 on_progress(len(individuals), len(individuals))
             return [r for r in results if r is not None]

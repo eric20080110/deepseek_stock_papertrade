@@ -425,6 +425,16 @@ CREATE TABLE IF NOT EXISTS paper_equity_history (
     equity      REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_equity_hist ON paper_equity_history(instance_id, timestamp);
+CREATE TABLE IF NOT EXISTS speed_records (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id     TEXT NOT NULL,
+    task_id         TEXT NOT NULL,
+    total_bars      REAL NOT NULL,
+    total_seconds   REAL NOT NULL,
+    bars_per_second REAL NOT NULL,
+    recorded_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_speed_template ON speed_records(template_id, recorded_at);
 """
 
 _TURSO_SCHEMA = """
@@ -513,6 +523,16 @@ CREATE TABLE IF NOT EXISTS evolution_task_results (
     champions_json  TEXT NOT NULL DEFAULT '[]',
     created_at      INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS speed_records (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id     TEXT NOT NULL,
+    task_id         TEXT NOT NULL,
+    total_bars      REAL NOT NULL,
+    total_seconds   REAL NOT NULL,
+    bars_per_second REAL NOT NULL,
+    recorded_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_speed_template ON speed_records(template_id, recorded_at);
 """
 
 
@@ -599,3 +619,49 @@ def sync_task_to_turso(task_id: str):
         ),
     )
     local.close()
+
+
+def save_speed_record(template_id: str, task_id: str, total_bars: float, total_seconds: float):
+    if total_seconds <= 0:
+        return
+    bars_per_second = total_bars / total_seconds
+    now = int(__import__("time").time())
+    conn = get_db()
+    conn.execute(
+        """INSERT INTO speed_records (template_id, task_id, total_bars, total_seconds, bars_per_second, recorded_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (template_id, task_id, total_bars, total_seconds, bars_per_second, now),
+    )
+    conn.commit()
+    conn.close()
+    try:
+        turso = get_turso()
+        turso.execute(
+            """INSERT INTO speed_records (template_id, task_id, total_bars, total_seconds, bars_per_second, recorded_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (template_id, task_id, total_bars, total_seconds, bars_per_second, now),
+        )
+    except Exception:
+        pass
+
+
+def get_avg_speed(template_id: str, default_bps: float = 95000.0) -> float:
+    try:
+        turso = get_turso()
+        row = turso.execute(
+            "SELECT AVG(bars_per_second) as avg_bps FROM speed_records WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()
+        if row and row["avg_bps"] is not None and row["avg_bps"] > 0:
+            return float(row["avg_bps"])
+    except Exception:
+        pass
+    conn = get_db()
+    row = conn.execute(
+        "SELECT AVG(bars_per_second) as avg_bps FROM speed_records WHERE template_id = ?",
+        (template_id,),
+    ).fetchone()
+    conn.close()
+    if row and row["avg_bps"] is not None and row["avg_bps"] > 0:
+        return float(row["avg_bps"])
+    return default_bps

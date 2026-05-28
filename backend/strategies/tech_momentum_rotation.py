@@ -12,7 +12,7 @@ def generate_signals(ohlcv: pd.DataFrame, params: dict) -> pd.Series:
     return pd.Series(np.zeros(len(ohlcv), dtype=int), index=ohlcv.index)
 
 
-def compute_indicators(close_arr: np.ndarray, params: dict) -> dict:
+def compute_indicators(close_arr: np.ndarray, symbol: str, params: dict) -> dict:
     lb1 = int(params.get("lookback_1m", 21))
     lb3 = int(params.get("lookback_3m", 63))
     lb6 = int(params.get("lookback_6m", 126))
@@ -29,7 +29,7 @@ def compute_indicators(close_arr: np.ndarray, params: dict) -> dict:
     }
 
 
-def score_asset(ind: dict, close: float, i: int, params: dict) -> float:
+def score_asset(ind: dict, symbol: str, close: float, i: int, params: dict) -> float:
     r1 = ind["ret_1m"][i]
     r3 = ind["ret_3m"][i]
     r6 = ind["ret_6m"][i]

@@ -16,6 +16,7 @@ export default defineConfig({
       '/paper-trading': { target: 'http://localhost:8000', ws: true },
       '/gene-pool': { target: 'http://localhost:8000', ws: true },
       '/system': { target: 'http://localhost:8000', ws: true },
+      '/symbols': { target: 'http://localhost:8000', ws: true },
     },
   },
 })

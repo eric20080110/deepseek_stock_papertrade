@@ -1,10 +1,18 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTaskStore } from '../../store/taskStore'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { StatCards } from './StatCards'
 import { TrendChart } from './TrendChart'
 import { LiveScatter } from './LiveScatter'
 import { GenerationLog } from './GenerationLog'
+
+function formatDuration(sec: number): string {
+  if (sec < 60) return `${sec} 秒`
+  if (sec < 3600) return `${Math.round(sec / 60)} 分 ${sec % 60} 秒`
+  const h = Math.floor(sec / 3600)
+  const m = Math.round((sec % 3600) / 60)
+  return `${h} 時 ${m} 分`
+}
 
 export function MonitorPanel() {
   const tasks = useTaskStore((s) => s.tasks)
@@ -15,6 +23,13 @@ export function MonitorPanel() {
   const latest = generationHistory.length > 0 ? generationHistory[generationHistory.length - 1] : null
   const individualProgress = useTaskStore((s) => s.individualProgress)
   const lastTaskIdRef = useRef<string | null>(null)
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
+  useEffect(() => {
+    if (!activeTask) return
+    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [activeTask?.task_id])
+  const elapsed = activeTask?.started_at ? now - activeTask.started_at : 0
 
   useEffect(() => {
     if (activeTask && activeTask.task_id !== lastTaskIdRef.current) {
@@ -53,6 +68,9 @@ export function MonitorPanel() {
           )}
           <div className="w-48 h-2 bg-gray-200 rounded-full mt-1 overflow-hidden">
             <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${activeTask.progress_pct}%` }} />
+          </div>
+          <div className="text-xs text-gray-400 mt-1">
+            已運行 {formatDuration(elapsed)}
           </div>
         </div>
       </div>

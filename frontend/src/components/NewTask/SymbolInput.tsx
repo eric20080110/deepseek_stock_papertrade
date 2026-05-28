@@ -6,24 +6,34 @@ interface Props {
   onChange: (symbols: string[]) => void
 }
 
-let cache: { label: string; value: string }[] | null = null
+interface Suggestion {
+  label: string
+  value: string
+  market: 'crypto' | 'us_equity' | 'us_etf' | 'us_index'
+}
+
+let cryptoCache: { label: string; value: string; market: 'crypto' }[] | null = null
+
+const API_BASE = ''
 
 export function SymbolInput({ symbols, onChange }: Props) {
   const [input, setInput] = useState('')
-  const [suggestions, setSuggestions] = useState<{ label: string; value: string }[]>([])
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(!cache)
+  const [loading, setLoading] = useState(!cryptoCache)
+  const [usLoading, setUsLoading] = useState(false)
   const [highlightIdx, setHighlightIdx] = useState(-1)
   const ref = useRef<HTMLDivElement>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
-    if (cache) { setLoading(false); return }
+    if (cryptoCache) { setLoading(false); return }
     fetch('https://api.binance.com/api/v3/exchangeInfo')
       .then((r) => r.json())
       .then((data) => {
-        cache = (data.symbols as any[])
+        cryptoCache = (data.symbols as any[])
           .filter((s: any) => s.status === 'TRADING' && s.quoteAsset === 'USDT')
-          .map((s: any) => ({ label: `${s.baseAsset}/${s.quoteAsset}`, value: `${s.baseAsset}${s.quoteAsset}` }))
+          .map((s: any) => ({ label: `${s.baseAsset}/${s.quoteAsset}`, value: `${s.baseAsset}${s.quoteAsset}`, market: 'crypto' as const }))
           .sort((a, b) => a.label.localeCompare(b.label))
         setLoading(false)
       })
@@ -32,13 +42,40 @@ export function SymbolInput({ symbols, onChange }: Props) {
 
   useEffect(() => {
     if (input.length === 0) { setSuggestions([]); setOpen(false); return }
-    const q = input.toUpperCase().replace('/', '')
-    const matches = cache
-      ?.filter((s) => s.value.includes(q))
-      .slice(0, 20) ?? []
-    setSuggestions(matches)
-    setOpen(matches.length > 0)
-    setHighlightIdx(-1)
+
+    clearTimeout(debounceRef.current)
+
+    debounceRef.current = setTimeout(async () => {
+      const q = input.toUpperCase().replace('/', '')
+
+      // crypto from local cache
+      const crypto = cryptoCache
+        ?.filter((s) => s.value.includes(q))
+        .slice(0, 10) ?? []
+
+      // US stocks from backend
+      let us: Suggestion[] = []
+      setUsLoading(true)
+      try {
+        const res = await fetch(`${API_BASE}/symbols/search?q=${encodeURIComponent(q)}`)
+        if (res.ok) {
+          const data = await res.json()
+          us = (data.results || []).map((r: any) => ({
+            label: `${r.symbol}${r.name && r.name !== r.symbol ? `  ${r.name}` : ''}`,
+            value: r.symbol,
+            market: r.type as Suggestion['market'],
+          }))
+        }
+      } catch { /* ignore */ }
+      setUsLoading(false)
+
+      const merged = [...crypto, ...us].slice(0, 20)
+      setSuggestions(merged)
+      setOpen(merged.length > 0)
+      setHighlightIdx(-1)
+    }, 200)
+
+    return () => clearTimeout(debounceRef.current)
   }, [input])
 
   useEffect(() => {
@@ -54,6 +91,24 @@ export function SymbolInput({ symbols, onChange }: Props) {
     if (v && !symbols.includes(v)) onChange([...symbols, v])
     setInput('')
     setOpen(false)
+  }
+
+  const marketLabel = (m: Suggestion['market']) => {
+    switch (m) {
+      case 'crypto': return '加密幣'
+      case 'us_equity': return '美股'
+      case 'us_etf': return 'ETF'
+      case 'us_index': return '指數'
+    }
+  }
+
+  const marketColor = (m: Suggestion['market']) => {
+    switch (m) {
+      case 'crypto': return 'bg-yellow-100 text-yellow-700'
+      case 'us_equity': return 'bg-blue-100 text-blue-700'
+      case 'us_etf': return 'bg-purple-100 text-purple-700'
+      case 'us_index': return 'bg-green-100 text-green-700'
+    }
   }
 
   const remove = (sym: string) => onChange(symbols.filter((s) => s !== sym))
@@ -82,21 +137,28 @@ export function SymbolInput({ symbols, onChange }: Props) {
             if (e.key === 'Escape') setOpen(false)
           }}
           onFocus={() => input.length > 0 && suggestions.length > 0 && setOpen(true)}
-          placeholder="輸入代號（如 BTC）自動搜尋..."
+          placeholder="輸入代號（如 BTC / AAPL）自動搜尋..."
           className="w-full pl-8 pr-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
         />
-        {loading && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">載入中…</div>}
+          {(loading || usLoading) && (
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+              {loading ? '載入中…' : '搜尋美股…'}
+            </div>
+          )}
       </div>
       {open && (
         <div className="absolute z-50 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
           {suggestions.map((s, i) => {
             const alreadyAdded = symbols.includes(s.value)
             return (
-              <button key={s.value}
+              <button key={`${s.market}_${s.value}`}
                 onMouseDown={(e) => { e.preventDefault(); add(s.value) }}
                 className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between cursor-pointer ${i === highlightIdx ? 'bg-blue-100' : 'hover:bg-gray-50'} ${alreadyAdded ? 'opacity-40' : ''}`}>
-                <span>{s.label}</span>
-                {alreadyAdded && <span className="text-xs text-gray-400">已加入</span>}
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${marketColor(s.market)}`}>{marketLabel(s.market)}</span>
+                  <span className="truncate">{s.label}</span>
+                </div>
+                {alreadyAdded && <span className="text-xs text-gray-400 shrink-0">已加入</span>}
               </button>
             )
           })}

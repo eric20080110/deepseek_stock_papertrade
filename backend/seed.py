@@ -167,6 +167,17 @@ TEMPLATES = [
             {"type": "ordering", "params": ["stop_loss_pct","take_profit_pct"],    "relation": "less_than", "repair": "clamp_upper"},
         ],
     },
+    {
+        "template_id": "mega_cap_rotation",
+        "name": "High-Conviction Mega-Cap Rotation",
+        "description": "以隨機森林分類器預測 mega-cap 科技股未來5日是否打敗 QQQ。特徵為10日報酬與主動報酬（股票-QQQ），每月重新訓練。信心度>70%時集中持有最高分個股，否則持有QQQ。標的：AAPL/AMZN/GOOGL/META/MSFT/NVDA/TSLA/AMD。",
+        "parameters": [
+            {"type": "continuous", "name": "min_confidence",       "label": "最低信心門檻",  "min": 0.50, "max": 0.95, "default": 0.70},
+            {"type": "integer",    "name": "n_estimators",          "label": "隨機森林樹數",  "min": 50,  "max": 200, "default": 100, "step": 10},
+            {"type": "integer",    "name": "max_depth",             "label": "樹深度",        "min": 2,   "max": 8,   "default": 4,   "step": 1},
+        ],
+        "constraints": [],
+    },
 ]
 
 

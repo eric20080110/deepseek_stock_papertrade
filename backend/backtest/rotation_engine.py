@@ -10,6 +10,7 @@ from typing import Optional
 
 from .models import TradeRecord, SymbolResult
 from .metrics import compute_metrics
+from profile_helper import log as _plog
 
 
 def _align_data(data_map: dict[str, pd.DataFrame]) -> tuple[pd.DatetimeIndex, dict[str, np.ndarray]]:
@@ -46,6 +47,7 @@ def run_rotation_backtest(
     spy_symbol: str = "SPY",
     strategy_module=None,
 ) -> Optional[SymbolResult]:
+    _bt_start = time.perf_counter()
     if strategy_module is not None:
         compute_indicators = strategy_module.compute_indicators
         score_asset = strategy_module.score_asset
@@ -67,9 +69,16 @@ def run_rotation_backtest(
     has_spy = spy_symbol in close_arrays
 
     # Precompute indicators for each risk symbol
+    _ind_start = time.perf_counter()
     indicators = {}
     for sym in risk_symbols:
-        indicators[sym] = compute_indicators(close_arrays[sym], params)
+        indicators[sym] = compute_indicators(close_arrays[sym], sym, params)
+    # Also compute for safe symbol (ML strategies may need benchmark data)
+    if has_safe and safe_symbol not in risk_symbols:
+        indicators[safe_symbol] = compute_indicators(close_arrays[safe_symbol], safe_symbol, params)
+    _ind_end = time.perf_counter()
+    _plog(f"compute_indicators: {_ind_end-_ind_start:.3f}s "
+          f"for {len(risk_symbols)} symbols n_bars={len(idx)}")
 
     # SPY SMA200 for market regime
     spy_sma_period = int(params.get("spy_sma_period", 200))
@@ -153,7 +162,7 @@ def run_rotation_backtest(
             px = _get_close(sym, i)
             if px <= 0:
                 continue
-            sc = score_asset(indicators[sym], px, i, params)
+            sc = score_asset(indicators[sym], sym, px, i, params)
             if not np.isnan(sc):
                 scores[sym] = sc
 
@@ -280,8 +289,16 @@ def run_rotation_backtest(
         else:
             equity_curve[i] = cash
 
+    _loop_end = time.perf_counter()
+    _plog(f"rotation loop: {_loop_end-_ind_end:.2f}s "
+          f"for {n} bars x {len(risk_symbols)} syms, "
+          f"trades={len(trades)}")
+
     equity_list = [float(v) for v in equity_curve]
     metrics = compute_metrics(equity_list, trades, n, bars_per_year=252)
+
+    _bt_end = time.perf_counter()
+    _plog(f"rotation total: {_bt_end-_bt_start:.2f}s")
 
     return SymbolResult(
         symbol="ROTATION_PORTFOLIO",

@@ -9,12 +9,13 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from database import sync_task_to_turso, get_db, get_turso, release_db, checkpoint_db
+from database import sync_task_to_turso, get_db, get_turso, release_db, checkpoint_db, save_speed_record, get_avg_speed
 from evolution.task_manager import TaskManager
 from evolution.engine import EvolutionEngine
 from evolution.models import TaskConfig, TaskStatus
 from evolution.config import SETTINGS as EVO_SETTINGS
 from data_fetcher import _BAR_SECONDS
+from strategies.speed import get_speed_factor
 
 router = APIRouter(prefix="/tasks", tags=["evolution"])
 task_manager = TaskManager()
@@ -46,8 +47,52 @@ def _broadcast_generation(gen_result, task_id: str):
     _notify_clients(task_id, {"type": "GENERATION_COMPLETED", "data": gen_result.model_dump()})
 
 
+def _record_speed(task_id: str):
+    try:
+        task = task_manager.get_task(task_id)
+        if not task or not task.started_at or not task.completed_at:
+            return
+        cfg = task.config
+        if not cfg.symbols:
+            return
+        total_secs = task.completed_at - task.started_at
+        if total_secs <= 0:
+            return
+        bar_s = _BAR_SECONDS.get(cfg.timeframe or "1d", 3600)
+        start_ts = int(pd.Timestamp(cfg.start_date).timestamp())
+        end_ts = int(pd.Timestamp(cfg.end_date).timestamp())
+        bars_per_sym = max(1, (end_ts - start_ts) // bar_s)
+        n_sym = len(cfg.symbols)
+        pop = cfg.population_size or 200
+        gens_done = task.current_generation or 1
+
+        from strategies.base import get_strategy_module as _get_mod
+        from evolution.config import SETTINGS as _EVO_SETTINGS
+        conn = get_db()
+        config_row = conn.execute(
+            "SELECT template_id FROM strategy_configs WHERE config_id = ?",
+            (cfg.strategy_config_id,),
+        ).fetchone()
+        conn.close()
+        tid = (config_row["template_id"] or cfg.strategy_config_id) if config_row else cfg.strategy_config_id
+        mod = _get_mod(tid)
+        is_rotation = bool(mod and getattr(mod, "IS_ROTATION", False))
+
+        n_windows = cfg.walk_forward_windows or 1
+        total_bars = gens_done * pop * bars_per_sym
+        if is_rotation:
+            total_bars = int(total_bars * 1.5)
+        else:
+            total_bars = int(total_bars * n_sym * 2 * n_windows)
+
+        save_speed_record(tid, task_id, float(total_bars), float(total_secs))
+    except Exception:
+        pass
+
+
 def _run_task_background(task_id: str):
-    task_manager.update_task(task_id, status="RUNNING", started_at=int(time.time()))
+    started_at = int(time.time())
+    task_manager.update_task(task_id, status="RUNNING", started_at=started_at)
     completed_msg = None
     try:
         def progress(gen, current, total):
@@ -66,6 +111,9 @@ def _run_task_background(task_id: str):
     except Exception as e:
         task_manager.fail_task(task_id, str(e))
         completed_msg = {"type": "TASK_FAILED", "task_id": task_id, "error": str(e)}
+
+    # Record actual speed for future estimation calibration
+    _record_speed(task_id)
 
     # Turso sync is best-effort: network errors must never flip a completed task to failed
     try:
@@ -94,12 +142,36 @@ class CreateTaskRequest(BaseModel):
 
 
 class EstimateRequest(BaseModel):
+    strategy_config_id: str = ""
     symbols: list[str]
     start_date: str
     end_date: str
     timeframe: str = "1d"
     population_size: int = 200
     max_generations: int = 50
+    walk_forward_windows: int = 1
+
+
+def _get_template_id(config_id: str) -> tuple[Optional[str], Optional[dict]]:
+    try:
+        t = get_turso()
+        row = t.execute(
+            "SELECT template_id, parameters_json FROM strategy_configs WHERE config_id = ?",
+            (config_id,),
+        ).fetchone()
+        if row:
+            return row["template_id"] or config_id, row
+    except Exception:
+        pass
+    conn = get_db()
+    row = conn.execute(
+        "SELECT template_id, parameters_json FROM strategy_configs WHERE config_id = ?",
+        (config_id,),
+    ).fetchone()
+    conn.close()
+    if row:
+        return row["template_id"] or config_id, row
+    return config_id, None
 
 
 @router.post("/estimate")
@@ -113,19 +185,43 @@ def estimate_task(req: EstimateRequest):
     pop = req.population_size
     n_sym = len(req.symbols)
     gens = req.max_generations
+    n_windows = req.walk_forward_windows
 
-    bars_per_second = 95000.0
-    backtests_per_ind = n_sym
-    batches = math.ceil(pop / workers)
-    time_per_gen = batches * backtests_per_ind * bars_per_symbol / bars_per_second
-    total_secs = gens * time_per_gen * 1.25
+    is_rotation = False
+    template_id = ""
+    if req.strategy_config_id:
+        tid, _ = _get_template_id(req.strategy_config_id)
+        template_id = tid or ""
+        from strategies.base import get_strategy_module
+        mod = get_strategy_module(template_id)
+        is_rotation = bool(mod and getattr(mod, "IS_ROTATION", False))
+
+    speed = get_avg_speed(template_id, get_speed_factor(template_id) * 95000.0)
+
+    if is_rotation:
+        rotation_overhead = 1.5
+        total_bars_per_ind = bars_per_symbol * rotation_overhead
+        total_bars_per_gen = pop * total_bars_per_ind
+    else:
+        backtests_per_ind = n_sym * 2 * n_windows
+        total_bars_per_ind = bars_per_symbol * backtests_per_ind
+        total_bars_per_gen = total_bars_per_ind * pop
+
+    time_per_gen = total_bars_per_gen / workers / speed
+    total_secs = gens * time_per_gen
+
+    expected_gens = max(1, gens // 2)
 
     return {
         "estimated_seconds": round(total_secs),
+        "expected_seconds": round(total_secs * expected_gens / gens),
         "bars_per_symbol": bars_per_symbol,
-        "total_bars_per_backtest": bars_per_symbol * n_sym,
+        "total_bars_per_backtest": total_bars_per_ind,
         "time_per_gen_sec": round(time_per_gen, 1),
         "num_workers": workers,
+        "is_rotation": is_rotation,
+        "speed_bps": round(speed, 1),
+        "avg_gens_used": expected_gens,
     }
 
 

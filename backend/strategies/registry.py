@@ -7,4 +7,5 @@ STRATEGY_REGISTRY: dict[str, str] = {
     "omniscient_paradox": "strategies.omniscient_paradox",
     "tech_momentum_rotation": "strategies.tech_momentum_rotation",
     "mandelbrot_vol_clustering": "strategies.mandelbrot_vol_clustering",
+    "mega_cap_rotation": "strategies.mega_cap_rotation",
 }

@@ -437,9 +437,7 @@ class PaperTradingEngine:
                              "get_inst_ms": int((_t["get_inst"]-_t["start"])*1000),
                              "ensure_ms": int((_t["ensure"]-_t["get_inst"])*1000)}}
         total_equity = self._compute_total_equity(instance_id)
-        # Only update metrics/equity in DB when there were actual trades or periodically
-        if events:
-            self._update_instance_metrics(instance_id, total_equity)
+        self._update_instance_metrics(instance_id, total_equity)
         _t["metrics"] = time.time()
         ts = int(time.time())
         self._save_equity_point(instance_id, ts, total_equity)
@@ -606,8 +604,7 @@ class PaperTradingEngine:
                 self._update_position_price(instance_id, current_asset, float(close_arrays[current_asset][i]))
 
         total_equity = self._compute_total_equity(instance_id)
-        if events:
-            self._update_instance_metrics(instance_id, total_equity)
+        self._update_instance_metrics(instance_id, total_equity)
         self._save_equity_point(instance_id, int(time.time()), total_equity)
 
         result = {
