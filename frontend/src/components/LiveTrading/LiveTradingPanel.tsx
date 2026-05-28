@@ -3,61 +3,69 @@ import { AccountList } from './AccountList'
 import { CreateAccountForm } from './CreateAccountForm'
 import { AccountDetail } from './AccountDetail'
 
-interface RenderStatus {
+interface AccountInfo {
   connected: boolean
-  url?: string
-  instances?: number
+  equity?: number
+  cash?: number
+  buying_power?: number
+  status?: string
+  currency?: string
   reason?: string
 }
 
-function RenderStatusBadge() {
-  const [status, setStatus] = useState<RenderStatus | null>(null)
+function AccountSummary() {
+  const [info, setInfo] = useState<AccountInfo | null>(null)
 
   useEffect(() => {
     const check = () =>
-      fetch('/live-trading/render-status')
+      fetch('/live-trading/account')
         .then((r) => r.json())
-        .then(setStatus)
-        .catch(() => setStatus({ connected: false, reason: 'fetch_error' }))
+        .then(setInfo)
+        .catch(() => setInfo({ connected: false }))
     check()
     const t = setInterval(check, 30000)
     return () => clearInterval(t)
   }, [])
 
-  if (!status) return <span className="text-xs text-gray-400">檢查 Render...</span>
+  if (!info) return null
 
-  if (status.reason === 'not_configured') {
+  if (!info.connected) {
     return (
-      <span className="flex items-center gap-1.5 text-xs text-gray-400">
-        <span className="w-2 h-2 rounded-full bg-gray-300" />
-        Render 未設定
-      </span>
-    )
-  }
-
-  if (status.connected) {
-    return (
-      <span className="flex items-center gap-1.5 text-xs text-rose-600">
-        <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-        Render 運行中（{status.instances} 個實例）
-      </span>
-    )
-  }
-
-  if (status.reason === 'not_deployed') {
-    return (
-      <span className="flex items-center gap-1.5 text-xs text-amber-500">
-        <span className="w-2 h-2 rounded-full bg-amber-400" />
-        Render 尚未部署
-      </span>
+      <div className="p-3 bg-gray-50 border rounded-lg text-sm text-gray-500">
+        Alpaca 未連線（{info.reason === 'not_configured' ? '未設定 API Key' : info.reason || '連線失敗'}）
+      </div>
     )
   }
 
   return (
-    <span className="flex items-center gap-1.5 text-xs text-red-500">
-      <span className="w-2 h-2 rounded-full bg-red-400" />
-      Render 未連線
-    </span>
+    <div className="p-3 bg-gradient-to-r from-rose-50 to-orange-50 border border-rose-200 rounded-lg">
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-medium text-rose-600 uppercase tracking-wide">Alpaca 帳戶</span>
+        <span className={`text-xs px-1.5 py-0.5 rounded ${info.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+          {info.status || 'UNKNOWN'}
+        </span>
+      </div>
+      <div className="flex gap-6 mt-2">
+        <div>
+          <div className="text-xs text-gray-500">總權益</div>
+          <div className="text-lg font-bold text-gray-900">
+            {info.currency === 'USD' ? '$' : ''}{info.equity?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">可用現金</div>
+          <div className="text-base font-semibold text-gray-700">
+            {info.currency === 'USD' ? '$' : ''}{info.cash?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">購買力</div>
+          <div className="text-base font-semibold text-gray-700">
+            {info.currency === 'USD' ? '$' : ''}{info.buying_power?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -72,14 +80,14 @@ export function LiveTradingPanel() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold text-rose-700">實盤跑盤</h1>
-              <div className="mt-1">
-                <RenderStatusBadge />
-              </div>
             </div>
             <button onClick={() => setView('create')}
               className="px-4 py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 cursor-pointer">
               + 新增實盤實例
             </button>
+          </div>
+          <div className="mb-6">
+            <AccountSummary />
           </div>
           <AccountList onViewDetail={(id) => { setDetailId(id); setView('detail') }} />
         </>

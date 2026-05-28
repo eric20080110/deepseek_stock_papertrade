@@ -53,7 +53,11 @@ export function AccountCard({ instance, onView }: Props) {
         ))}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mt-4">
+      <div className="grid grid-cols-4 gap-2 mt-4">
+        <div>
+          <div className="text-xs text-gray-400">資金上限</div>
+          <div className="text-base font-bold">${instance.initial_capital?.toLocaleString()}</div>
+        </div>
         <div>
           <div className="text-xs text-gray-400">總報酬率</div>
           <div className={`text-base font-bold ${instance.total_return >= 0 ? 'text-green-600' : 'text-red-600'}`}>

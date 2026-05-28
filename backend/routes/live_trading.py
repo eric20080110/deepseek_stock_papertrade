@@ -35,6 +35,27 @@ def _row_to_instance(row) -> LiveInstance:
     )
 
 
+@router.get("/account")
+def account_info():
+    from live_trading.alpaca import get_account, CONFIGURED
+    if not CONFIGURED:
+        return {"connected": False, "reason": "not_configured"}
+    try:
+        acct = get_account()
+        if not acct:
+            return {"connected": False, "reason": "alpaca_unreachable"}
+        return {
+            "connected": True,
+            "equity": float(acct.get("equity", 0)),
+            "cash": float(acct.get("cash", 0)),
+            "buying_power": float(acct.get("buying_power", 0)),
+            "status": acct.get("status", ""),
+            "currency": acct.get("currency", "USD"),
+        }
+    except Exception as e:
+        return {"connected": False, "reason": str(e)}
+
+
 @router.get("/render-status")
 def render_status():
     import os, urllib.request, urllib.error

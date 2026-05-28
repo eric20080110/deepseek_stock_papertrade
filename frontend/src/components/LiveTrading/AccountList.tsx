@@ -11,7 +11,7 @@ export function AccountList({ onViewDetail }: Props) {
   useEffect(() => {
     fetch('/live-trading')
       .then((r) => r.json())
-      .then(setInstances)
+      .then((data) => { if (Array.isArray(data)) setInstances(data) })
   }, [])
 
   return (

@@ -144,9 +144,10 @@ export function CreateAccountForm() {
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium mb-1">初始資金 (USDT)</label>
-          <input type="number" min={1000} max={1000000} value={capital} onChange={(e) => setCapital(+e.target.value)}
+          <label className="block text-sm font-medium mb-1">可用資金上限 (USDT)</label>
+          <input type="number" min={100} max={10000000} value={capital} onChange={(e) => setCapital(+e.target.value)}
             className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-rose-500" />
+          <div className="text-xs text-gray-400 mt-1">此實例最多能使用的資金，依標的數量均分</div>
         </div>
         <div>
           {isRotation ? (
