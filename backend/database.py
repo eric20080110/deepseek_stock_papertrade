@@ -435,6 +435,45 @@ CREATE TABLE IF NOT EXISTS speed_records (
     recorded_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_speed_template ON speed_records(template_id, recorded_at);
+
+CREATE TABLE IF NOT EXISTS live_instances (
+    instance_id         TEXT PRIMARY KEY,
+    name                TEXT NOT NULL,
+    strategy_config_id  TEXT NOT NULL,
+    params_json         TEXT NOT NULL DEFAULT '{}',
+    symbols             TEXT NOT NULL DEFAULT '[]',
+    initial_capital     REAL DEFAULT 10000,
+    status              TEXT NOT NULL DEFAULT 'INITIALIZING',
+    started_at          INTEGER NOT NULL,
+    stopped_at          INTEGER,
+    timeframe           TEXT DEFAULT '1d',
+    total_equity        REAL DEFAULT 0,
+    total_return        REAL DEFAULT 0,
+    unrealized_pnl      REAL DEFAULT 0,
+    realized_pnl        REAL DEFAULT 0,
+    trade_count         INTEGER DEFAULT 0,
+    win_rate            REAL DEFAULT 0,
+    max_drawdown        REAL DEFAULT 0,
+    schedule_time       TEXT DEFAULT '16:30',
+    max_daily_loss_pct  REAL,
+    max_position_size_pct REAL
+);
+CREATE TABLE IF NOT EXISTS live_orders (
+    order_id        TEXT PRIMARY KEY,
+    instance_id     TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    side            TEXT NOT NULL,
+    order_type      TEXT DEFAULT 'market',
+    qty             REAL NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'PENDING',
+    filled_qty      REAL DEFAULT 0,
+    filled_avg_price REAL DEFAULT 0,
+    alpaca_order_id TEXT,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    reason          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_live_orders_inst ON live_orders(instance_id, created_at);
 """
 
 _TURSO_SCHEMA = """
@@ -533,6 +572,45 @@ CREATE TABLE IF NOT EXISTS speed_records (
     recorded_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_speed_template ON speed_records(template_id, recorded_at);
+
+CREATE TABLE IF NOT EXISTS live_instances (
+    instance_id         TEXT PRIMARY KEY,
+    name                TEXT NOT NULL,
+    strategy_config_id  TEXT NOT NULL,
+    params_json         TEXT NOT NULL DEFAULT '{}',
+    symbols             TEXT NOT NULL DEFAULT '[]',
+    initial_capital     REAL DEFAULT 10000,
+    status              TEXT NOT NULL DEFAULT 'INITIALIZING',
+    started_at          INTEGER NOT NULL,
+    stopped_at          INTEGER,
+    timeframe           TEXT DEFAULT '1d',
+    total_equity        REAL DEFAULT 0,
+    total_return        REAL DEFAULT 0,
+    unrealized_pnl      REAL DEFAULT 0,
+    realized_pnl        REAL DEFAULT 0,
+    trade_count         INTEGER DEFAULT 0,
+    win_rate            REAL DEFAULT 0,
+    max_drawdown        REAL DEFAULT 0,
+    schedule_time       TEXT DEFAULT '16:30',
+    max_daily_loss_pct  REAL,
+    max_position_size_pct REAL
+);
+CREATE TABLE IF NOT EXISTS live_orders (
+    order_id        TEXT PRIMARY KEY,
+    instance_id     TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    side            TEXT NOT NULL,
+    order_type      TEXT DEFAULT 'market',
+    qty             REAL NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'PENDING',
+    filled_qty      REAL DEFAULT 0,
+    filled_avg_price REAL DEFAULT 0,
+    alpaca_order_id TEXT,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    reason          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_live_orders_inst ON live_orders(instance_id, created_at);
 """
 
 
