@@ -24,9 +24,13 @@ from routes.paper_trading import set_event_loop as set_pt_event_loop
 from routes.gene_pool import router as gene_pool_router
 from routes.symbols import router as symbols_router
 from routes.live_trading import router as live_trading_router
+from live_trading.engine import LiveTradingEngine
+from live_trading.scheduler import LiveScheduler
 from paper_trading.ticker import PaperTicker
 
 ticker = PaperTicker(paper_engine)
+live_engine = LiveTradingEngine()
+live_scheduler = LiveScheduler(live_engine)
 
 
 @asynccontextmanager
@@ -38,8 +42,10 @@ async def lifespan(app: FastAPI):
     checkpoint_db()
     seed_templates()
     ticker.start()
+    live_scheduler.start()
     yield
     await ticker.stop()
+    await live_scheduler.stop()
 
 
 app = FastAPI(title="QuantGene Platform", lifespan=lifespan)
