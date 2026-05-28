@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useTaskStore } from '../../store/taskStore'
 import type { ViewType } from '../../types/evolution'
-import { Layers, PlusCircle, List, Activity, BarChart3, Gauge, Dna } from 'lucide-react'
+import { Layers, PlusCircle, List, Activity, BarChart3, Gauge, Dna, Radio } from 'lucide-react'
 import { DbStatusPanel } from './DbStatusPanel'
 
 const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
@@ -12,6 +12,7 @@ const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
   { id: 'analysis', label: '結果分析', icon: <BarChart3 className="w-4 h-4" /> },
   { id: 'gene-pool', label: '基因庫', icon: <Dna className="w-4 h-4" /> },
   { id: 'paper-trading', label: '模擬跑盤', icon: <Gauge className="w-4 h-4" /> },
+  { id: 'live-trading', label: '實盤跑盤', icon: <Radio className="w-4 h-4" /> },
 ]
 
 export function Sidebar() {

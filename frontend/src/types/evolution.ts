@@ -54,4 +54,4 @@ export interface FrontIndividual {
   oos: number
 }
 
-export type ViewType = 'strategy' | 'new-task' | 'queue' | 'monitor' | 'analysis' | 'gene-pool' | 'paper-trading'
+export type ViewType = 'strategy' | 'new-task' | 'queue' | 'monitor' | 'analysis' | 'gene-pool' | 'paper-trading' | 'live-trading'

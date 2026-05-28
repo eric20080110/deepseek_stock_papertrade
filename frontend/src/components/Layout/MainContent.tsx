@@ -5,6 +5,7 @@ import { TaskList } from '../TaskQueue/TaskList'
 import { MonitorPanel } from '../Monitor/MonitorPanel'
 import { AnalysisPanel } from '../Analysis/AnalysisPanel'
 import { PaperTradingPanel } from '../PaperTrading/PaperTradingPanel'
+import { LiveTradingPanel } from '../LiveTrading/LiveTradingPanel'
 import { GenePoolPanel } from '../GenePool/GenePoolPanel'
 
 export function MainContent() {
@@ -17,6 +18,7 @@ export function MainContent() {
     monitor: <MonitorPanel />,
     analysis: <AnalysisPanel />,
     'paper-trading': <PaperTradingPanel />,
+    'live-trading': <LiveTradingPanel />,
     'gene-pool': <GenePoolPanel />,
   }
 
