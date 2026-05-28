@@ -200,6 +200,24 @@ def _run_one(params: dict) -> Optional[dict]:
 class ParallelScheduler:
     def __init__(self, max_workers: Optional[int] = None):
         self.max_workers = max_workers or SETTINGS.max_workers
+        self._pool: Optional[Pool] = None
+        self._pool_initargs: Optional[tuple] = None
+
+    def _get_or_create_pool(self, initargs: tuple) -> Pool:
+        if self._pool is None:
+            self._pool_initargs = initargs
+            self._pool = Pool(
+                self.max_workers,
+                initializer=_init_worker,
+                initargs=initargs,
+            )
+        return self._pool
+
+    def close(self):
+        if self._pool is not None:
+            self._pool.terminate()
+            self._pool = None
+            self._pool_initargs = None
 
     def run_backtests(
         self,
@@ -216,12 +234,9 @@ class ParallelScheduler:
 
         if self.max_workers > 1 and len(individuals) > 1:
             _t0 = time.perf_counter()
-            with Pool(
-                self.max_workers,
-                initializer=_init_worker,
-                initargs=(strategy_id, symbols, data_map, initial_capital, oos_data_map, walk_maps),
-            ) as pool:
-                results = pool.map(_run_one, individuals)
+            initargs = (strategy_id, symbols, data_map, initial_capital, oos_data_map, walk_maps)
+            pool = self._get_or_create_pool(initargs)
+            results = pool.map(_run_one, individuals)
             _t1 = time.perf_counter()
             _plog(f"Pool gen: {_t1-_t0:.2f}s for {len(individuals)} individuals "
                   f"({self.max_workers} workers)")

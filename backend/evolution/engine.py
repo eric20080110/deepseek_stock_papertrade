@@ -204,195 +204,199 @@ class EvolutionEngine:
         prev_front: list[dict] = []
         stagnant_count = 0
 
+        scheduler = ParallelScheduler()
         pool_total = 0.0
         score_total = 0.0
         save_total = 0.0
         select_total = 0.0
 
-        for gen in range(max_gen):
-            gen_start = time.perf_counter()
+        try:
+            for gen in range(max_gen):
+                gen_start = time.perf_counter()
 
-            _t0 = time.perf_counter()
-            results = ParallelScheduler().run_backtests(
-                individuals=pop,
-                strategy_id=strategy_id,
-                symbols=symbols,
-                data_map=walk_windows[0][0],
-                oos_data_map=walk_windows[0][1],
-                walk_data_maps=walk_windows if len(walk_windows) > 1 else None,
-                on_progress=lambda i, t: on_progress(gen + 1, i, t) if on_progress else None,
-            )
-            _t1 = time.perf_counter()
-            pool_total += _t1 - _t0
+                _t0 = time.perf_counter()
+                results = scheduler.run_backtests(
+                    individuals=pop,
+                    strategy_id=strategy_id,
+                    symbols=symbols,
+                    data_map=walk_windows[0][0],
+                    oos_data_map=walk_windows[0][1],
+                    walk_data_maps=walk_windows if len(walk_windows) > 1 else None,
+                    on_progress=lambda i, t: on_progress(gen + 1, i, t) if on_progress else None,
+                )
+                _t1 = time.perf_counter()
+                pool_total += _t1 - _t0
 
-            if not results:
-                self.task_manager.fail_task(task_id, "All backtests failed")
-                return
+                if not results:
+                    self.task_manager.fail_task(task_id, "All backtests failed")
+                    return
 
-            is_metrics = []
-            oos_metrics = []
-            for r in results:
-                wm = r["weighted_metrics"]
-                is_metrics.append({
-                    "strategy_id": r["strategy_id"],
-                    "annualized_return": wm.get("annualized_return", 0),
-                    "sharpe_ratio": wm.get("sharpe_ratio", 0),
-                    "max_drawdown": wm.get("max_drawdown", 0),
-                    "profit_factor": wm.get("profit_factor", 0),
-                    "win_rate": wm.get("win_rate", 0),
-                    "trade_count": wm.get("trade_count", 0),
-                    "equity_curve": wm.get("equity_curve", []),
-                    "equity_timestamps": wm.get("equity_timestamps", []),
-                })
-                oos_wm = r.get("oos_metrics")
-                if oos_wm:
-                    oos_metrics.append({
+                is_metrics = []
+                oos_metrics = []
+                for r in results:
+                    wm = r["weighted_metrics"]
+                    is_metrics.append({
                         "strategy_id": r["strategy_id"],
-                        "annualized_return": oos_wm.get("annualized_return", 0),
-                        "sharpe_ratio": oos_wm.get("sharpe_ratio", 0),
-                        "max_drawdown": oos_wm.get("max_drawdown", 0),
+                        "annualized_return": wm.get("annualized_return", 0),
+                        "sharpe_ratio": wm.get("sharpe_ratio", 0),
+                        "max_drawdown": wm.get("max_drawdown", 0),
+                        "profit_factor": wm.get("profit_factor", 0),
+                        "win_rate": wm.get("win_rate", 0),
+                        "trade_count": wm.get("trade_count", 0),
+                        "equity_curve": wm.get("equity_curve", []),
+                        "equity_timestamps": wm.get("equity_timestamps", []),
                     })
-                else:
-                    oos_metrics.append({
-                        "strategy_id": r["strategy_id"],
-                        "annualized_return": 0,
-                        "sharpe_ratio": 0,
-                        "max_drawdown": 0,
+                    oos_wm = r.get("oos_metrics")
+                    if oos_wm:
+                        oos_metrics.append({
+                            "strategy_id": r["strategy_id"],
+                            "annualized_return": oos_wm.get("annualized_return", 0),
+                            "sharpe_ratio": oos_wm.get("sharpe_ratio", 0),
+                            "max_drawdown": oos_wm.get("max_drawdown", 0),
+                        })
+                    else:
+                        oos_metrics.append({
+                            "strategy_id": r["strategy_id"],
+                            "annualized_return": 0,
+                            "sharpe_ratio": 0,
+                            "max_drawdown": 0,
+                        })
+
+                _t2 = time.perf_counter()
+                scores, summary = score_individuals(is_metrics, oos_metrics)
+                _t3 = time.perf_counter()
+                score_total += _t3 - _t2
+
+                survived = [s for s in scores if s.pareto_rank is not None]
+                front = [s for s in survived if s.pareto_rank == 1]
+                front_data = [
+                    {"id": s.strategy_id, "cagr": s.objective_vector.cagr,
+                     "dd": s.objective_vector.max_drawdown, "sharpe": s.objective_vector.sharpe,
+                     "oos": s.oos_consistency_score}
+                    for s in front
+                ]
+
+                ind_records = []
+                for idx, (s, res_item) in enumerate(zip(scores, results)):
+                    wm = res_item.get("weighted_metrics", {})
+                    ind_records.append({
+                        "strategy_id": s.strategy_id,
+                        "params": pop[idx] if idx < len(pop) else {},
+                        "pareto_rank": s.pareto_rank,
+                        "crowding_distance": s.crowding_distance,
+                        "is_elite": s.is_elite,
+                        "cagr": s.objective_vector.cagr,
+                        "max_drawdown": s.objective_vector.max_drawdown,
+                        "sharpe_ratio": s.objective_vector.sharpe,
+                        "profit_factor": s.threshold_metrics.profit_factor,
+                        "win_rate": s.threshold_metrics.win_rate,
+                        "r2": s.threshold_metrics.r2,
+                        "trade_count": s.threshold_metrics.trade_count,
+                        "oos_consistency_score": s.oos_consistency_score,
+                        "passed_absolute": s.passed_absolute_threshold,
+                        "passed_dynamic": s.passed_dynamic_threshold,
+                        "elimination_reason": s.elimination_reason,
+                        "equity_curve": wm.get("equity_curve", []),
+                        "equity_timestamps": wm.get("equity_timestamps", []),
+                        "symbol_results": res_item.get("symbol_results", {}),
                     })
+                _t4 = time.perf_counter()
+                self.task_manager.save_individuals(task_id, gen + 1, ind_records)
+                self.task_manager.save_pareto_front(task_id, gen + 1, front_data)
+                _t5 = time.perf_counter()
+                save_total += _t5 - _t4
 
-            _t2 = time.perf_counter()
-            scores, summary = score_individuals(is_metrics, oos_metrics)
-            _t3 = time.perf_counter()
-            score_total += _t3 - _t2
+                gen_dur = time.perf_counter() - gen_start
+                gen_result = GenerationResult(
+                    generation=gen + 1,
+                    total_generations=max_gen,
+                    duration_sec=round(gen_dur, 4),
+                    population_size=len(pop),
+                    passed_absolute=summary.passed_absolute,
+                    passed_dynamic=summary.passed_dynamic,
+                    pareto_front_size=len(front),
+                    pareto_front=front_data,
+                    best_cagr=summary.best_cagr,
+                    best_sharpe=summary.best_sharpe,
+                    best_drawdown=summary.best_drawdown,
+                    crossover_count=operators.crossover_count,
+                    mutation_count=operators.mutation_count,
+                    repair_count=operators.repair_count,
+                    resample_count=operators.resample_count,
+                    dynamic_thresholds=summary.dynamic_thresholds,
+                )
 
-            survived = [s for s in scores if s.pareto_rank is not None]
-            front = [s for s in survived if s.pareto_rank == 1]
-            front_data = [
-                {"id": s.strategy_id, "cagr": s.objective_vector.cagr,
-                 "dd": s.objective_vector.max_drawdown, "sharpe": s.objective_vector.sharpe,
-                 "oos": s.oos_consistency_score}
-                for s in front
-            ]
+                self.task_manager.save_generation(task_id, gen + 1, gen_result.model_dump())
 
-            ind_records = []
-            for idx, (s, res_item) in enumerate(zip(scores, results)):
-                wm = res_item.get("weighted_metrics", {})
-                ind_records.append({
-                    "strategy_id": s.strategy_id,
-                    "params": pop[idx] if idx < len(pop) else {},
-                    "pareto_rank": s.pareto_rank,
-                    "crowding_distance": s.crowding_distance,
-                    "is_elite": s.is_elite,
-                    "cagr": s.objective_vector.cagr,
-                    "max_drawdown": s.objective_vector.max_drawdown,
-                    "sharpe_ratio": s.objective_vector.sharpe,
-                    "profit_factor": s.threshold_metrics.profit_factor,
-                    "win_rate": s.threshold_metrics.win_rate,
-                    "r2": s.threshold_metrics.r2,
-                    "trade_count": s.threshold_metrics.trade_count,
-                    "oos_consistency_score": s.oos_consistency_score,
-                    "passed_absolute": s.passed_absolute_threshold,
-                    "passed_dynamic": s.passed_dynamic_threshold,
-                    "elimination_reason": s.elimination_reason,
-                    "equity_curve": wm.get("equity_curve", []),
-                    "equity_timestamps": wm.get("equity_timestamps", []),
-                    "symbol_results": res_item.get("symbol_results", {}),
-                })
-            _t4 = time.perf_counter()
-            self.task_manager.save_individuals(task_id, gen + 1, ind_records)
-            self.task_manager.save_pareto_front(task_id, gen + 1, front_data)
-            _t5 = time.perf_counter()
-            save_total += _t5 - _t4
+                self.task_manager.update_task(
+                    task_id,
+                    current_generation=gen + 1,
+                    progress_pct=round((gen + 1) / max_gen * 100, 1),
+                )
 
-            gen_dur = time.perf_counter() - gen_start
-            gen_result = GenerationResult(
-                generation=gen + 1,
-                total_generations=max_gen,
-                duration_sec=round(gen_dur, 4),
-                population_size=len(pop),
-                passed_absolute=summary.passed_absolute,
-                passed_dynamic=summary.passed_dynamic,
-                pareto_front_size=len(front),
-                pareto_front=front_data,
-                best_cagr=summary.best_cagr,
-                best_sharpe=summary.best_sharpe,
-                best_drawdown=summary.best_drawdown,
-                crossover_count=operators.crossover_count,
-                mutation_count=operators.mutation_count,
-                repair_count=operators.repair_count,
-                resample_count=operators.resample_count,
-                dynamic_thresholds=summary.dynamic_thresholds,
-            )
+                if on_generation:
+                    on_generation(gen_result)
 
-            self.task_manager.save_generation(task_id, gen + 1, gen_result.model_dump())
+                task = self.task_manager.get_task(task_id)
+                if task and task.status in ("CANCELLED",):
+                    break
 
-            self.task_manager.update_task(
-                task_id,
-                current_generation=gen + 1,
-                progress_pct=round((gen + 1) / max_gen * 100, 1),
-            )
+                should_stop, stagnant_count = self._check_early_stop(
+                    front_data, prev_front, stagnant_count
+                )
+                prev_front = front_data
+                operators.adapt_mutation_rate(not should_stop or gen == 0)
 
-            if on_generation:
-                on_generation(gen_result)
+                if should_stop and gen + 1 < max_gen:
+                    if on_generation:
+                        on_generation(None, early_stop=True)
+                    break
+
+                elites = [s for s in front if s.is_elite]
+                elite_params = []
+                for s in elites:
+                    idx = next((i for i, r in enumerate(results) if r["strategy_id"] == s.strategy_id), None)
+                    if idx is not None and idx < len(pop):
+                        elite_params.append(pop[idx])
+
+                if not survived:
+                    pop = [space.sample().params for _ in range(pop_size)]
+                    operators.reset_stats()
+                    continue
+
+                _t6 = time.perf_counter()
+                pool_size = int(pop_size * cfg.parent_pool_ratio)
+                parent_pool = operators.tournament_select(survived, pool_size)
+
+                parent_params = {}
+                for s in parent_pool:
+                    idx = next((i for i, r in enumerate(results) if r["strategy_id"] == s.strategy_id), None)
+                    if idx is not None and idx < len(pop):
+                        parent_params[s.strategy_id] = pop[idx]
+
+                remaining = pop_size - len(elite_params)
+                offspring = operators.produce_offspring(parent_pool, parent_params, remaining)
+                pop = elite_params + offspring
+                operators.reset_stats()
+                _t7 = time.perf_counter()
+                select_total += _t7 - _t6
+
+            _plog(f"Task {task_id}: "
+                  f"backtests={pool_total:.1f}s scoring={score_total:.1f}s "
+                  f"save={save_total:.1f}s select={select_total:.1f}s "
+                  f"total_per_gen={(pool_total+score_total+save_total+select_total)/max(gen+1,1):.2f}s/gen")
 
             task = self.task_manager.get_task(task_id)
-            if task and task.status in ("CANCELLED",):
-                break
+            if task and task.status == "CANCELLED":
+                return
 
-            should_stop, stagnant_count = self._check_early_stop(
-                front_data, prev_front, stagnant_count
-            )
-            prev_front = front_data
-            operators.adapt_mutation_rate(not should_stop or gen == 0)
-
-            if should_stop and gen + 1 < max_gen:
-                if on_generation:
-                    on_generation(None, early_stop=True)
-                break
-
-            elites = [s for s in front if s.is_elite]
-            elite_params = []
-            for s in elites:
-                idx = next((i for i, r in enumerate(results) if r["strategy_id"] == s.strategy_id), None)
-                if idx is not None and idx < len(pop):
-                    elite_params.append(pop[idx])
-
-            if not survived:
-                pop = [space.sample().params for _ in range(pop_size)]
-                operators.reset_stats()
-                continue
-
-            _t6 = time.perf_counter()
-            pool_size = int(pop_size * cfg.parent_pool_ratio)
-            parent_pool = operators.tournament_select(survived, pool_size)
-
-            parent_params = {}
-            for s in parent_pool:
-                idx = next((i for i, r in enumerate(results) if r["strategy_id"] == s.strategy_id), None)
-                if idx is not None and idx < len(pop):
-                    parent_params[s.strategy_id] = pop[idx]
-
-            remaining = pop_size - len(elite_params)
-            offspring = operators.produce_offspring(parent_pool, parent_params, remaining)
-            pop = elite_params + offspring
-            operators.reset_stats()
-            _t7 = time.perf_counter()
-            select_total += _t7 - _t6
-
-        _plog(f"Task {task_id}: "
-              f"backtests={pool_total:.1f}s scoring={score_total:.1f}s "
-              f"save={save_total:.1f}s select={select_total:.1f}s "
-              f"total_per_gen={(pool_total+score_total+save_total+select_total)/max(gen+1,1):.2f}s/gen")
-
-        task = self.task_manager.get_task(task_id)
-        if task and task.status == "CANCELLED":
-            return
-
-        final_summary = {
-            "total_generations": min(gen + 1, max_gen),
-            "final_pareto_front": front_data,
-            "best_cagr": summary.best_cagr,
-            "best_sharpe": summary.best_sharpe,
-            "best_drawdown": summary.best_drawdown,
-        }
-        self.task_manager.complete_task(task_id, final_summary)
+            final_summary = {
+                "total_generations": min(gen + 1, max_gen),
+                "final_pareto_front": front_data,
+                "best_cagr": summary.best_cagr,
+                "best_sharpe": summary.best_sharpe,
+                "best_drawdown": summary.best_drawdown,
+            }
+            self.task_manager.complete_task(task_id, final_summary)
+        finally:
+            scheduler.close()
