@@ -90,6 +90,44 @@ def create_instance(req: CreateLiveInstanceRequest):
     return _row_to_instance(row).model_dump()
 
 
+@router.post("/from-paper/{paper_instance_id}")
+def promote_from_paper(paper_instance_id: str):
+    db = get_db()
+    paper = db.execute(
+        "SELECT * FROM paper_instances WHERE instance_id = ?", (paper_instance_id,)
+    ).fetchone()
+    if not paper:
+        db.close()
+        raise HTTPException(404, "Paper trading instance not found")
+
+    instance_id = str(uuid.uuid4())
+    now = int(time.time())
+    db.execute(
+        """INSERT INTO live_instances
+           (instance_id, name, strategy_config_id, params_json, symbols,
+            initial_capital, status, started_at, timeframe, schedule_time)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            instance_id,
+            paper["name"] + " (實盤)",
+            paper["strategy_config_id"],
+            paper["params_json"],
+            paper["symbols"],
+            paper["initial_capital"],
+            LiveStatus.INITIALIZING.value,
+            now,
+            paper["timeframe"],
+            "16:30",
+        ),
+    )
+    db.commit()
+    row = db.execute(
+        "SELECT * FROM live_instances WHERE instance_id = ?", (instance_id,)
+    ).fetchone()
+    db.close()
+    return _row_to_instance(row).model_dump()
+
+
 @router.get("/{instance_id}")
 def get_instance(instance_id: str):
     db = get_db()

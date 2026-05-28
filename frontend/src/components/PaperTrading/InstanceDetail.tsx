@@ -170,6 +170,12 @@ export function InstanceDetail({ instanceId }: Props) {
             <button onClick={handleContinue}
               className="px-3 py-1.5 text-sm border border-green-200 text-green-600 rounded-lg hover:bg-green-50 cursor-pointer">繼續</button>
           )}
+          <button onClick={async () => {
+            if (!confirm(`將 "${instance.name}" 複製到實盤跑盤？`)) return
+            await fetch('/live-trading/from-paper/' + instance.instance_id, { method: 'POST' })
+            window.location.reload()
+          }}
+            className="px-3 py-1.5 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer">轉入實盤</button>
           <button onClick={instance.status === 'STOPPED' ? handleDelete : handleStop}
             className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 cursor-pointer">
             {instance.status === 'STOPPED' ? '刪除' : '停止'}

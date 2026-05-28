@@ -101,6 +101,16 @@ export function InstanceCard({ instance, onView }: Props) {
           {instance.status === 'STOPPED' ? '刪除' : '停止'}
         </button>
       </div>
+      <div className="mt-2 pt-2 border-t">
+        <button onClick={async () => {
+          if (!confirm(`將 "${instance.name}" 複製到實盤跑盤？`)) return
+          await fetch('/live-trading/from-paper/' + instance.instance_id, { method: 'POST' })
+          window.location.reload()
+        }}
+          className="w-full px-3 py-1.5 text-xs border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer">
+          + 轉入實盤
+        </button>
+      </div>
     </div>
   )
 }
