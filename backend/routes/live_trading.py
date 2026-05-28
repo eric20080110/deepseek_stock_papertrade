@@ -4,15 +4,8 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
-from database import get_turso as _get_turso, get_db as _get_local
-from live_trading.models import CreateLiveInstanceRequest, CreateManualOrderRequest, LiveInstance, LiveOrder, LivePosition, LiveStatus, OrderStatus
-
-
-def get_db():
-    try:
-        return _get_turso()
-    except Exception:
-        return _get_local()
+from database import get_live_db as get_db
+from live_trading.models import CreateLiveInstanceRequest, CreateManualOrderRequest, LiveInstance, LivePosition, LiveStatus, OrderType
 
 router = APIRouter(prefix="/live-trading", tags=["live_trading"])
 
@@ -246,7 +239,7 @@ def create_manual_order(instance_id: str, req: CreateManualOrderRequest):
     order_id = str(uuid.uuid4())
     db.execute(
         "INSERT INTO live_orders (order_id, instance_id, symbol, side, order_type, qty, status, created_at, updated_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (order_id, instance_id, req.symbol, req.side, req.order_type or "market",
+        (order_id, instance_id, req.symbol, req.side.value, (req.order_type or OrderType.MARKET).value,
          req.qty, "PENDING", now, now, json.dumps({"action": "manual", "source": "user"})),
     )
     db.commit()

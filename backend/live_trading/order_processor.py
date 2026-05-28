@@ -3,7 +3,7 @@ import json
 import logging
 import time
 
-from database import get_db
+from database import get_live_db as get_db
 from live_trading.alpaca import configured as alpaca_configured, submit_order, get_order
 
 logger = logging.getLogger(__name__)

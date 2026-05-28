@@ -8,7 +8,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from database import get_db
+from database import get_live_db as get_db
 from backtest.data_cache import DATA_CACHE
 from strategies.base import get_strategy_module
 

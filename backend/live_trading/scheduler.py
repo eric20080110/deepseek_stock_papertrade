@@ -3,7 +3,7 @@ import logging
 import time
 from datetime import date, datetime
 
-from database import get_db
+from database import get_live_db as get_db
 from live_trading.engine import LiveTradingEngine
 
 logger = logging.getLogger(__name__)

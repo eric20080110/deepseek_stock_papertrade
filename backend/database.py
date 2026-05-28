@@ -270,6 +270,14 @@ def checkpoint_db():
         pass
 
 
+def get_live_db():
+    """Try Turso first (prod), fall back to local SQLite (dev)."""
+    try:
+        return get_turso()
+    except Exception:
+        return get_db()
+
+
 def get_turso() -> _TursoConnection:
     global _turso_instance
     if _turso_instance is None:
