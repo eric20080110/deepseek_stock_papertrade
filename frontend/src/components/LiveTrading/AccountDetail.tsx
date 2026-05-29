@@ -119,6 +119,11 @@ export function AccountDetail({ instanceId }: Props) {
                   <span className="ml-2 text-xs text-gray-400">
                     {p.qty ? `數量 ${p.qty}` : ''}
                   </span>
+                  {p.market_value ? (
+                    <span className="ml-2 text-xs text-gray-400">
+                      持有 ${typeof p.market_value === 'number' ? p.market_value.toFixed(2) : p.market_value}
+                    </span>
+                  ) : ''}
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-medium">

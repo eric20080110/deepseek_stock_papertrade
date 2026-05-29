@@ -214,7 +214,9 @@ export function InstanceDetail({ instanceId }: Props) {
       {tab === 'monitor' && (
         <div>
           <div className="space-y-2 mb-4">
-            {positions.map((p: any) => (
+            {positions.map((p: any) => {
+              const mv = (p.current_price || 0) * (p.quantity || 0)
+              return (
               <div key={p.symbol} className="flex items-center justify-between p-3 border rounded-lg bg-white">
                 <div>
                   <span className="font-medium text-sm">{p.symbol}</span>
@@ -222,14 +224,14 @@ export function InstanceDetail({ instanceId }: Props) {
                     p.side === 'long' ? 'bg-green-100 text-green-700' :
                     p.side === 'short' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'
                   }`}>{p.side === 'long' ? '多' : p.side === 'short' ? '空' : '無'}</span>
+                  {p.quantity ? (
+                    <span className="ml-2 text-xs text-gray-400">
+                      持有 ${mv.toFixed(2)}
+                    </span>
+                  ) : ''}
                   <span className="ml-2 text-xs text-gray-400">
                     {p.current_price ? `現價 $${typeof p.current_price === 'number' ? p.current_price.toFixed(2) : p.current_price}` : ''}
                   </span>
-                  {p.entry_price ? (
-                    <span className="ml-2 text-xs text-gray-400">
-                      入場 ${typeof p.entry_price === 'number' ? p.entry_price.toFixed(2) : p.entry_price}
-                    </span>
-                  ) : ''}
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-medium">
@@ -240,7 +242,8 @@ export function InstanceDetail({ instanceId }: Props) {
                   </div>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
           <div ref={chartRef} className="w-full border rounded-lg bg-white p-3 mb-3" />
           <div className="space-y-3">
