@@ -499,7 +499,7 @@ class PaperTradingEngine:
         has_spy = spy_symbol in close_arrays
         has_safe = safe_symbol in close_arrays
 
-        indicators = {sym: compute_indicators(close_arrays[sym], params) for sym in risk_symbols}
+        indicators = {sym: compute_indicators(close_arrays[sym], sym, params) for sym in risk_symbols}
 
         spy_sma_period = int(params.get("spy_sma_period", 200))
         if has_spy:
@@ -516,7 +516,7 @@ class PaperTradingEngine:
             px = float(close_arrays[sym][i]) if not np.isnan(close_arrays[sym][i]) else 0.0
             if px <= 0:
                 continue
-            sc = score_asset(indicators[sym], px, i, params)
+            sc = score_asset(indicators[sym], sym, px, i, params)
             if not np.isnan(sc):
                 scores[sym] = sc
 
