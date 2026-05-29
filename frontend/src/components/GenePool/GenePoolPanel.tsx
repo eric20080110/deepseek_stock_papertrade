@@ -129,6 +129,12 @@ export function GenePoolPanel() {
     load()
   }
 
+  const deleteTaskChampions = async (taskId: string) => {
+    if (!confirm('確定刪除此任務的所有冠軍基因？此操作無法還原。')) return
+    await fetch(`/gene-pool/tasks/${taskId}`, { method: 'DELETE' })
+    load()
+  }
+
   const openDeployDialog = (c: Champion, task: GeneTask, configId: string) => {
     setDeployTarget({ champion: c, task, configId })
     setDeployCapital(10000)
@@ -262,6 +268,10 @@ export function GenePoolPanel() {
                         <span className="text-xs text-gray-400 shrink-0">{task.timeframe}</span>
                         <span className="text-xs text-gray-400 shrink-0">G{task.current_generation}/{task.total_generations}</span>
                       </div>
+                      <button onClick={(e) => { e.stopPropagation(); deleteTaskChampions(task.task_id) }}
+                        className="ml-2 shrink-0 cursor-pointer" title="刪除此任務所有冠軍">
+                        <Trash2 className="w-3 h-3 text-gray-400 hover:text-red-500" />
+                      </button>
                     </button>
 
                     {tExpanded && (

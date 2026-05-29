@@ -135,6 +135,25 @@ def delete_individual(strategy_id: str):
     return {"detail": "Individual deleted"}
 
 
+@router.delete("/tasks/{task_id}")
+def delete_task_champions(task_id: str):
+    local = get_db()
+    sids = local.execute(
+        "SELECT strategy_id FROM individuals WHERE task_id = ?", (task_id,)
+    ).fetchall()
+    local.execute("DELETE FROM individuals WHERE task_id = ?", (task_id,))
+    local.commit()
+    local.close()
+    if sids:
+        conn, is_remote = _remote_conn()
+        for row in sids:
+            conn.execute("DELETE FROM gene_favorites WHERE strategy_id = ?", (row["strategy_id"],))
+        if not is_remote:
+            conn.commit()
+            conn.close()
+    return {"detail": f"Deleted {len(sids)} champions from task {task_id}"}
+
+
 class RenameTaskPayload(BaseModel):
     name: str
 
