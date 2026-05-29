@@ -60,18 +60,22 @@ export function AccountCard({ instance, onView }: Props) {
           <div className="text-base font-bold">${instance.initial_capital?.toLocaleString()}</div>
         </div>
         <div>
-          <div className="text-xs text-gray-400">總報酬率</div>
-          <div className={`text-base font-bold ${instance.total_return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {instance.total_return >= 0 ? '+' : ''}{instance.total_return?.toFixed(2)}%
+          <div className="text-xs text-gray-400">總資產</div>
+          <div className="text-base font-bold">
+            ${instance.total_equity?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
         <div>
-          <div className="text-xs text-gray-400">交易次數</div>
-          <div className="text-base font-bold">{instance.trade_count}</div>
+          <div className="text-xs text-gray-400">未實現</div>
+          <div className={`text-base font-bold ${(instance.unrealized_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {instance.unrealized_pnl >= 0 ? '+' : ''}{instance.unrealized_pnl?.toFixed(2)}
+          </div>
         </div>
         <div>
-          <div className="text-xs text-gray-400">精度</div>
-          <div className="text-base font-bold">{instance.timeframe || '-'}</div>
+          <div className="text-xs text-gray-400">報酬率</div>
+          <div className={`text-base font-bold ${instance.total_return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {instance.total_return >= 0 ? '+' : ''}{instance.total_return?.toFixed(2)}%
+          </div>
         </div>
       </div>
 

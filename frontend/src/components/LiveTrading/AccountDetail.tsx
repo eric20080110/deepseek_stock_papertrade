@@ -18,6 +18,7 @@ export function AccountDetail({ instanceId }: Props) {
   const [orderSaving, setOrderSaving] = useState(false)
   const [flattening, setFlattening] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [chartRange, setChartRange] = useState<'1W' | '1M' | '3M' | 'ALL'>('ALL')
 
   const refreshAll = useCallback(() => {
     setRefreshing(true)
@@ -47,13 +48,14 @@ export function AccountDetail({ instanceId }: Props) {
   }, [tab, refreshAll])
 
   useEffect(() => {
-    if (!chartRef.current || equityHistory.length < 2) {
-      if (chartRef.current && equityHistory.length === 1) {
-        // Single point — show minimal chart with just initial
+    if (!chartRef.current) return
+    const data = filteredHistory.length > 0 ? filteredHistory : equityHistory
+    if (data.length < 2) {
+      if (data.length === 1) {
         const Plotly = (window as any).Plotly
         if (Plotly) {
           Plotly.newPlot(chartRef.current, [{
-            x: [new Date(equityHistory[0].timestamp * 1000)], y: [equityHistory[0].equity],
+            x: [new Date(data[0].timestamp * 1000)], y: [data[0].equity],
             type: 'scatter', mode: 'lines+markers',
             line: { color: '#e11d48' }, name: '總資產',
           }], {
@@ -68,8 +70,8 @@ export function AccountDetail({ instanceId }: Props) {
     const Plotly = (window as any).Plotly
     if (!Plotly) return
     Plotly.newPlot(chartRef.current, [{
-      x: equityHistory.map((e) => new Date(e.timestamp * 1000)),
-      y: equityHistory.map((e) => e.equity),
+      x: data.map((e) => new Date(e.timestamp * 1000)),
+      y: data.map((e) => e.equity),
       type: 'scatter', mode: 'lines',
       line: { color: '#e11d48' }, name: '總資產',
     }], {
@@ -77,7 +79,15 @@ export function AccountDetail({ instanceId }: Props) {
       xaxis: { title: '' }, yaxis: { title: 'USDT' },
       paper_bgcolor: 'white', plot_bgcolor: 'white',
     }, { responsive: true, displayModeBar: false })
-  }, [equityHistory])
+  }, [equityHistory, chartRange])
+
+  const filteredHistory = (() => {
+    if (chartRange === 'ALL' || equityHistory.length === 0) return equityHistory
+    const now = Date.now() / 1000
+    const cutoffs: Record<string, number> = { '1W': 604800, '1M': 2592000, '3M': 7776000 }
+    const since = now - (cutoffs[chartRange] || 0)
+    return equityHistory.filter((e) => e.timestamp >= since)
+  })()
 
   const handleStop = async () => {
     if (!confirm('確定停止？將強制平倉所有持倉。')) return
@@ -223,8 +233,23 @@ export function AccountDetail({ instanceId }: Props) {
                   <div className="text-sm font-medium">
                     {p.unrealized_pnl >= 0 ? '+' : ''}{p.unrealized_pnl?.toFixed(2)} USDT
                   </div>
+                  {p.change_pct !== undefined && (
+                    <div className={`text-xs ${p.change_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {p.change_pct >= 0 ? '+' : ''}{p.change_pct?.toFixed(2)}%
+                    </div>
+                  )}
                 </div>
               </div>
+            ))}
+          </div>
+          <div className="flex gap-1 mb-2">
+            {(['1W', '1M', '3M', 'ALL'] as const).map((r) => (
+              <button key={r} onClick={() => setChartRange(r)}
+                className={`px-3 py-1 text-xs rounded cursor-pointer ${
+                  chartRange === r ? 'bg-rose-600 text-white' : 'bg-gray-100 hover:bg-gray-200'
+                }`}>
+                {r === '1W' ? '1 週' : r === '1M' ? '1 月' : r === '3M' ? '3 月' : '全部'}
+              </button>
             ))}
           </div>
           <div ref={chartRef} className="w-full border rounded-lg bg-white p-3" />
