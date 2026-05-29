@@ -228,6 +228,16 @@ def get_orders(instance_id: str):
     return [dict(r) for r in rows]
 
 
+@router.get("/{instance_id}/equity-history")
+def get_equity_history(instance_id: str):
+    db = get_db()
+    rows = db.execute(
+        "SELECT timestamp, equity FROM live_equity_history WHERE instance_id = ? ORDER BY timestamp ASC", (instance_id,)
+    ).fetchall()
+    db.close()
+    return [{"timestamp": r["timestamp"], "equity": float(r["equity"])} for r in rows]
+
+
 @router.post("/{instance_id}/orders")
 def create_manual_order(instance_id: str, req: CreateManualOrderRequest):
     db = get_db()

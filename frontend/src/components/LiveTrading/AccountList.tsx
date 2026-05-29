@@ -9,9 +9,15 @@ export function AccountList({ onViewDetail }: Props) {
   const [instances, setInstances] = useState<any[]>([])
 
   useEffect(() => {
-    fetch('/live-trading')
-      .then((r) => r.json())
-      .then((data) => { if (Array.isArray(data)) setInstances(data) })
+    const load = () => {
+      fetch('/live-trading')
+        .then((r) => r.json())
+        .then((data) => { if (Array.isArray(data)) setInstances(data) })
+        .catch(() => {})
+    }
+    load()
+    const t = setInterval(load, 30000)
+    return () => clearInterval(t)
   }, [])
 
   return (

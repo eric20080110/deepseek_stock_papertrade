@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 
 interface Props {
   instanceId: string
@@ -8,35 +8,76 @@ export function AccountDetail({ instanceId }: Props) {
   const [instance, setInstance] = useState<any>(null)
   const [positions, setPositions] = useState<any[]>([])
   const [orders, setOrders] = useState<any[]>([])
+  const [equityHistory, setEquityHistory] = useState<{ timestamp: number; equity: number }[]>([])
   const [tab, setTab] = useState<'monitor' | 'orders' | 'params'>('monitor')
   const chartRef = useRef<HTMLDivElement>(null)
+  const [showOrderForm, setShowOrderForm] = useState(false)
+  const [orderSymbol, setOrderSymbol] = useState('')
+  const [orderSide, setOrderSide] = useState<'buy' | 'sell'>('buy')
+  const [orderQty, setOrderQty] = useState(0)
+  const [orderSaving, setOrderSaving] = useState(false)
+  const [flattening, setFlattening] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
-  function refreshAll() {
-    fetch(`/live-trading/${instanceId}`).then((r) => r.json()).then(setInstance)
-    fetch(`/live-trading/${instanceId}/positions`).then((r) => r.json()).then(setPositions)
-    fetch(`/live-trading/${instanceId}/orders`).then((r) => r.json()).then(setOrders)
-  }
+  const refreshAll = useCallback(() => {
+    setRefreshing(true)
+    Promise.allSettled([
+      fetch(`/live-trading/${instanceId}`).then((r) => r.json()).then(setInstance).catch(() => {}),
+      fetch(`/live-trading/${instanceId}/positions`).then((r) => r.json()).then(setPositions).catch(() => {}),
+      fetch(`/live-trading/${instanceId}/orders`).then((r) => r.json()).then(setOrders).catch(() => {}),
+    ]).finally(() => setRefreshing(false))
+  }, [instanceId])
 
-  useEffect(() => {
-    refreshAll()
-    const t = setInterval(refreshAll, 15000)
-    return () => clearInterval(t)
+  const loadEquityHistory = useCallback(() => {
+    fetch(`/live-trading/${instanceId}/equity-history`)
+      .then((r) => r.json())
+      .then(setEquityHistory)
+      .catch(() => {})
   }, [instanceId])
 
   useEffect(() => {
-    if (!chartRef.current || !instance) return
+    refreshAll()
+    loadEquityHistory()
+  }, [refreshAll, loadEquityHistory])
+
+  useEffect(() => {
+    if (tab !== 'monitor') return
+    const t = setInterval(refreshAll, 15000)
+    return () => clearInterval(t)
+  }, [tab, refreshAll])
+
+  useEffect(() => {
+    if (!chartRef.current || equityHistory.length < 2) {
+      if (chartRef.current && equityHistory.length === 1) {
+        // Single point — show minimal chart with just initial
+        const Plotly = (window as any).Plotly
+        if (Plotly) {
+          Plotly.newPlot(chartRef.current, [{
+            x: [new Date(equityHistory[0].timestamp * 1000)], y: [equityHistory[0].equity],
+            type: 'scatter', mode: 'lines+markers',
+            line: { color: '#e11d48' }, name: '總資產',
+          }], {
+            margin: { t: 10, r: 20, b: 40, l: 60 }, height: 200,
+            xaxis: { title: '' }, yaxis: { title: 'USDT' },
+            paper_bgcolor: 'white', plot_bgcolor: 'white',
+          }, { responsive: true, displayModeBar: false })
+        }
+      }
+      return
+    }
     const Plotly = (window as any).Plotly
     if (!Plotly) return
-    const curve = [instance.initial_capital, instance.total_equity || instance.initial_capital]
     Plotly.newPlot(chartRef.current, [{
-      x: ['開始', '目前'], y: curve, type: 'scatter', mode: 'lines',
+      x: equityHistory.map((e) => new Date(e.timestamp * 1000)),
+      y: equityHistory.map((e) => e.equity),
+      type: 'scatter', mode: 'lines',
       line: { color: '#e11d48' }, name: '總資產',
     }], {
       margin: { t: 10, r: 20, b: 40, l: 60 }, height: 200,
       xaxis: { title: '' }, yaxis: { title: 'USDT' },
       paper_bgcolor: 'white', plot_bgcolor: 'white',
     }, { responsive: true, displayModeBar: false })
-  }, [instance])
+  }, [equityHistory])
 
   const handleStop = async () => {
     if (!confirm('確定停止？將強制平倉所有持倉。')) return
@@ -50,10 +91,55 @@ export function AccountDetail({ instanceId }: Props) {
     window.location.reload()
   }
 
+  const handleFlatten = async () => {
+    if (!confirm('確定平掉此實例所有 Alpaca 持倉？')) return
+    setFlattening(true)
+    try {
+      const res = await fetch(`/live-trading/${instanceId}/flatten`, { method: 'POST' })
+      const data = await res.json()
+      if (data.results) {
+        alert(data.results.map((r: any) => `${r.symbol}: ${r.result}`).join('\n'))
+      }
+    } catch {
+      alert('平倉請求失敗')
+    }
+    setFlattening(false)
+    refreshAll()
+  }
+
+  const handleSubmitOrder = async () => {
+    if (!orderSymbol || orderQty <= 0) return
+    setOrderSaving(true)
+    try {
+      const res = await fetch(`/live-trading/${instanceId}/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: orderSymbol, side: orderSide, qty: orderQty }),
+      })
+      if (res.ok) {
+        setShowOrderForm(false)
+        setOrderSymbol('')
+        setOrderQty(0)
+        refreshAll()
+      } else {
+        const err = await res.text()
+        alert(`下單失敗: ${err}`)
+      }
+    } catch {
+      alert('下單請求失敗')
+    }
+    setOrderSaving(false)
+  }
+
+  const instanceSymbols: string[] = instance?.symbols
+    ? (typeof instance.symbols === 'string' ? JSON.parse(instance.symbols) : instance.symbols)
+    : []
+
   if (!instance) return <div className="text-center py-8 text-gray-400">載入中...</div>
 
   const orderStatusColor: Record<string, string> = {
     PENDING: 'bg-yellow-100 text-yellow-800',
+    SUBMITTED: 'bg-blue-100 text-blue-800',
     FILLED: 'bg-green-100 text-green-800',
     PARTIALLY_FILLED: 'bg-blue-100 text-blue-800',
     CANCELLED: 'bg-gray-100 text-gray-600',
@@ -66,6 +152,14 @@ export function AccountDetail({ instanceId }: Props) {
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-xl font-bold">{instance.name}</h2>
         <div className="flex gap-2">
+          <button onClick={() => setShowOrderForm(true)}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
+            手動下單
+          </button>
+          <button onClick={handleFlatten} disabled={flattening}
+            className="px-3 py-1.5 text-sm border border-orange-200 text-orange-600 rounded-lg hover:bg-orange-50 disabled:opacity-50 cursor-pointer">
+            {flattening ? '平倉中...' : '一鍵平倉'}
+          </button>
           <button onClick={instance.status === 'STOPPED' ? handleDelete : handleStop}
             className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 cursor-pointer">
             {instance.status === 'STOPPED' ? '刪除' : '停止'}
@@ -73,7 +167,7 @@ export function AccountDetail({ instanceId }: Props) {
         </div>
       </div>
       <div className="text-sm text-gray-400 mb-4">
-        狀態：{instance.status} · 排程：每日 {instance.schedule_time || '16:30'}
+        狀態：{instance.status} · 排程：每日 {instance.schedule_time || '16:30'} {refreshing && <span className="text-blue-500 ml-2">更新中...</span>}
       </div>
 
       <div className="grid grid-cols-5 gap-3 mb-4">
@@ -185,6 +279,48 @@ export function AccountDetail({ instanceId }: Props) {
               null, 2
             )}
           </pre>
+        </div>
+      )}
+
+      {showOrderForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-80 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold">手動下單</h3>
+            <div>
+              <label className="block text-sm font-medium mb-1">標的</label>
+              <select value={orderSymbol} onChange={(e) => setOrderSymbol(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none">
+                <option value="">選擇標的</option>
+                {instanceSymbols.map((sym: string) => (
+                  <option key={sym} value={sym}>{sym}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setOrderSide('buy')}
+                className={`flex-1 py-2 rounded-lg text-sm cursor-pointer ${
+                  orderSide === 'buy' ? 'bg-green-600 text-white' : 'bg-gray-100'
+                }`}>買入</button>
+              <button onClick={() => setOrderSide('sell')}
+                className={`flex-1 py-2 rounded-lg text-sm cursor-pointer ${
+                  orderSide === 'sell' ? 'bg-red-600 text-white' : 'bg-gray-100'
+                }`}>賣出</button>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">數量</label>
+              <input type="number" min={0} step={1} value={orderQty || ''}
+                onChange={(e) => setOrderQty(Number(e.target.value))}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none" />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setShowOrderForm(false)}
+                className="flex-1 py-2 text-sm border rounded-lg hover:bg-gray-50 cursor-pointer">取消</button>
+              <button onClick={handleSubmitOrder} disabled={orderSaving || !orderSymbol || orderQty <= 0}
+                className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
+                {orderSaving ? '送出中...' : '送出'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

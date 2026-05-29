@@ -8,6 +8,41 @@ from live_trading.engine import LiveTradingEngine
 
 logger = logging.getLogger(__name__)
 
+# Major US market holidays (simplified; NYSE calendar)
+_US_HOLIDAYS_2025 = {
+    date(2025, 1, 1),   # New Year
+    date(2025, 1, 20),  # MLK Day
+    date(2025, 2, 17),  # Presidents Day
+    date(2025, 4, 18),  # Good Friday
+    date(2025, 5, 26),  # Memorial Day
+    date(2025, 6, 19),  # Juneteenth
+    date(2025, 7, 4),   # Independence Day
+    date(2025, 9, 1),   # Labor Day
+    date(2025, 11, 27), # Thanksgiving
+    date(2025, 12, 25), # Christmas
+}
+_US_HOLIDAYS_2026 = {
+    date(2026, 1, 1),
+    date(2026, 1, 19),
+    date(2026, 2, 16),
+    date(2026, 4, 3),
+    date(2026, 5, 25),
+    date(2026, 6, 19),
+    date(2026, 7, 3),
+    date(2026, 9, 7),
+    date(2026, 11, 26),
+    date(2026, 12, 25),
+}
+_US_HOLIDAYS = _US_HOLIDAYS_2025 | _US_HOLIDAYS_2026
+
+
+def _is_market_open(today: date) -> bool:
+    if today.weekday() >= 5:
+        return False
+    if today in _US_HOLIDAYS:
+        return False
+    return True
+
 
 class LiveScheduler:
     def __init__(self, engine: LiveTradingEngine):
@@ -44,6 +79,9 @@ class LiveScheduler:
 
     def _check_and_execute(self):
         today = date.today()
+        if not _is_market_open(today):
+            return
+
         today_str = today.isoformat()
         now = datetime.now()
         now_minutes = now.hour * 60 + now.minute

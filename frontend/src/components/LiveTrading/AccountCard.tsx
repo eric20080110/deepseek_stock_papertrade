@@ -3,7 +3,7 @@ const statusColors: Record<string, string> = {
   RUNNING: 'bg-rose-500',
   PAUSED: 'bg-yellow-400',
   STOPPED: 'bg-gray-400',
-  FAILED: 'bg-red-500',
+  ERROR: 'bg-red-500',
 }
 
 interface Props {
@@ -34,7 +34,8 @@ export function AccountCard({ instance, onView }: Props) {
     label: instance.status === 'INITIALIZING' ? '初始化中' :
            instance.status === 'RUNNING' ? '運行中' :
            instance.status === 'PAUSED' ? '已暫停' :
-           instance.status === 'STOPPED' ? '已停止' : '失敗',
+           instance.status === 'STOPPED' ? '已停止' :
+           instance.status === 'ERROR' ? '錯誤' : '失敗',
   }
 
   const symbols = typeof instance.symbols === 'string' ? JSON.parse(instance.symbols) : instance.symbols

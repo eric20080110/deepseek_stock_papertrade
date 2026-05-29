@@ -492,6 +492,13 @@ CREATE TABLE IF NOT EXISTS live_orders (
     reason          TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_live_orders_inst ON live_orders(instance_id, created_at);
+CREATE TABLE IF NOT EXISTS live_equity_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id TEXT NOT NULL,
+    timestamp   INTEGER NOT NULL,
+    equity      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_live_eq_inst ON live_equity_history(instance_id, timestamp);
 """
 
 _TURSO_SCHEMA = """
@@ -639,6 +646,13 @@ CREATE TABLE IF NOT EXISTS live_orders (
     reason          TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_live_orders_inst ON live_orders(instance_id, created_at);
+CREATE TABLE IF NOT EXISTS live_equity_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id TEXT NOT NULL,
+    timestamp   INTEGER NOT NULL,
+    equity      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_live_eq_inst ON live_equity_history(instance_id, timestamp);
 """
 
 
