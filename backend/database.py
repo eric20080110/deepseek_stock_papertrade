@@ -220,7 +220,7 @@ class _PooledConn:
         self._c.commit()
 
     def fetch_batch(self, sql_params: list[tuple]) -> list:
-        return [self._c.execute(sql, params) for sql, params in sql_params]
+        return [_SqliteBatchResult(self._c.execute(sql, params)) for sql, params in sql_params]
 
     def executescript(self, sql):
         return self._c.executescript(sql)
@@ -230,6 +230,16 @@ class _PooledConn:
 
     def close(self):
         pass  # reuse across calls on the same thread
+
+
+class _SqliteBatchResult:
+    """Mimics _TursoResult so fetch_batch callers work identically with local SQLite."""
+    def __init__(self, cursor: sqlite3.Cursor):
+        self._rows = cursor.fetchall()
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+    def fetchall(self):
+        return self._rows
 
 
 def get_db() -> "_PooledConn":
@@ -271,11 +281,8 @@ def checkpoint_db():
 
 
 def get_live_db():
-    """Try Turso first (prod), fall back to local SQLite (dev)."""
-    try:
-        return get_turso()
-    except Exception:
-        return get_db()
+    """Use local SQLite for reads (Turso may be rate-limited). Turso writes can still be done explicitly."""
+    return get_db()
 
 
 def get_turso() -> _TursoConnection:
@@ -675,6 +682,61 @@ def init_db():
     conn.close()
 
 
+_SYNC_TABLES = [
+    "paper_instances",
+    "virtual_positions",
+    "virtual_trades",
+    "paper_equity_history",
+    "live_instances",
+    "live_positions",
+    "live_orders",
+    "live_equity_history",
+    "gene_favorites",
+    "speed_records",
+]
+
+
+def sync_turso_to_local():
+    """Copy ALL data from Turso to local SQLite so the app works when Turso is rate-limited."""
+    if not TURSO_URL or not TURSO_TOKEN:
+        return
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    try:
+        t = get_turso()
+    except RuntimeError:
+        _log.warning("sync_turso_to_local: Turso not configured, skipping")
+        return
+
+    local = get_db()
+
+    for table in _SYNC_TABLES:
+        try:
+            col_info = t.execute(f"PRAGMA table_info({table})").fetchall()
+            if not col_info:
+                _log.warning("sync_turso_to_local: table %s has no columns, skipping", table)
+                continue
+            cols = [c["name"] for c in col_info]
+            placeholders = ",".join("?" for _ in cols)
+            col_list = ",".join(cols)
+
+            rows = t.execute(f"SELECT * FROM {table}").fetchall()
+            if not rows:
+                continue
+
+            local.executemany(
+                f"INSERT OR REPLACE INTO {table} ({col_list}) VALUES ({placeholders})",
+                [tuple(r[c] for c in cols) for r in rows],
+            )
+            _log.info("sync_turso_to_local: copied %d rows to %s", len(rows), table)
+        except Exception as e:
+            _log.warning("sync_turso_to_local: failed to sync %s: %s", table, e)
+
+    local.commit()
+    local.close()
+    _log.info("sync_turso_to_local: completed")
+
+
 def sync_strategies_to_local():
     if not TURSO_URL or not TURSO_TOKEN:
         return
@@ -766,16 +828,6 @@ def save_speed_record(template_id: str, task_id: str, total_bars: float, total_s
 
 
 def get_avg_speed(template_id: str, default_bps: float = 95000.0) -> float:
-    try:
-        turso = get_turso()
-        row = turso.execute(
-            "SELECT AVG(bars_per_second) as avg_bps FROM speed_records WHERE template_id = ?",
-            (template_id,),
-        ).fetchone()
-        if row and row["avg_bps"] is not None and row["avg_bps"] > 0:
-            return float(row["avg_bps"])
-    except Exception:
-        pass
     conn = get_db()
     row = conn.execute(
         "SELECT AVG(bars_per_second) as avg_bps FROM speed_records WHERE template_id = ?",

@@ -802,8 +802,10 @@ class PaperTradingEngine:
                 ("SELECT COUNT(*) as cnt FROM virtual_trades WHERE instance_id = ? AND realized_pnl > 0", (instance_id,)),
             ])
             conn.close()
-            trade_count = (results[0].fetchone() or {}).get("cnt") or 0
-            win_count = (results[1].fetchone() or {}).get("cnt") or 0
+            r0 = results[0].fetchone()
+            r1 = results[1].fetchone()
+            trade_count = r0["cnt"] if r0 else 0
+            win_count = r1["cnt"] if r1 else 0
         else:
             conn = get_db()
             pos_rows = conn.execute(
