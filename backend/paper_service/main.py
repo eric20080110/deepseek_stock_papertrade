@@ -110,12 +110,14 @@ def import_instances(payload: dict):
                 logger.warning("import %s row skipped: %s", table, e)
         conn.commit()
         imported[table] = count
-    # Reload running instances into memory
+    # Reload running instances into memory + recalc metrics from trades
     for inst in conn.execute("SELECT instance_id, status FROM paper_instances").fetchall():
         if inst["status"] == "RUNNING":
             is_running.append(inst["instance_id"])
             try:
                 engine._ensure_context(inst["instance_id"])
+                equity = engine._compute_total_equity(inst["instance_id"])
+                engine._update_instance_metrics(inst["instance_id"], equity)
             except Exception as e:
                 logger.warning("import reload %s: %s", inst["instance_id"], e)
     conn.close()
