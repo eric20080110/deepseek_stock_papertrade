@@ -12,18 +12,15 @@ _DATA_FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=3, thread_name_prefix="paper_data"
 )
 
-from database import get_turso as _get_turso, get_db as _get_local
+from database import get_db as _get_local
 from paper_trading.models import (
     PaperInstance, InstanceStatus, SourceType, CreateInstanceRequest,
 )
 
 
 def get_db():
-    """Return Turso if available, otherwise local SQLite. Timeout is 6s so fallback is fast."""
-    try:
-        return _get_turso()
-    except Exception:
-        return _get_local()
+    """Use local SQLite for reads/writes. Turso may be rate-limited."""
+    return _get_local()
 
 
 _instance_cache: dict[str, PaperInstance] = {}

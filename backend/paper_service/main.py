@@ -10,7 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import init_db, get_turso
+from database import init_db, get_db as get_local_db
 from engine_state import engine
 from paper_trading.ticker import PaperTicker  # uses backend's engine
 from paper_trading.models import InstanceStatus
@@ -80,6 +80,46 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan, title="QuantGene Paper Trading")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(pt_router)
+
+
+@app.post("/admin/import-instances")
+def import_instances(payload: dict):
+    """Import paper instances, positions, trades, equity history from a JSON dump.
+    Used to migrate data from Turso/local SQLite to a fresh deployment."""
+    conn = get_local_db()
+    imported: dict[str, int] = {}
+    is_running: list[str] = []
+    for table in ('paper_instances', 'virtual_positions', 'virtual_trades', 'paper_equity_history'):
+        rows = payload.get(table)
+        if not rows:
+            continue
+        cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        col_names = [c[1] for c in cols]
+        placeholders = ','.join(['?' for _ in col_names])
+        col_str = ','.join(col_names)
+        count = 0
+        for row in rows:
+            vals = [row.get(c) for c in col_names]
+            try:
+                conn.execute(
+                    f"INSERT OR REPLACE INTO {table} ({col_str}) VALUES ({placeholders})",
+                    vals,
+                )
+                count += 1
+            except Exception as e:
+                logger.warning("import %s row skipped: %s", table, e)
+        conn.commit()
+        imported[table] = count
+    # Reload running instances into memory
+    for inst in conn.execute("SELECT instance_id, status FROM paper_instances").fetchall():
+        if inst["status"] == "RUNNING":
+            is_running.append(inst["instance_id"])
+            try:
+                engine._ensure_context(inst["instance_id"])
+            except Exception as e:
+                logger.warning("import reload %s: %s", inst["instance_id"], e)
+    conn.close()
+    return {"imported": imported, "running_restored": len(is_running)}
 
 
 @app.get("/ping")
@@ -177,7 +217,7 @@ def tick_debug(instance_id: str = ""):
         try:
             from paper_trading.engine import PaperTradingEngine
             info["engine_class_file"] = sys.modules.get("paper_trading.engine").__file__
-        except:
+        except Exception:
             pass
         try:
             from paper_trading.models import CreateInstanceRequest
