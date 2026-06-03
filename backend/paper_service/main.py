@@ -43,29 +43,33 @@ async def lifespan(app):
     global _keepalive_task, _startup_time
     import time as _time
     _startup_time = _time.time()
-    configured = bool(os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"))
-    if configured:
-        init_db()
-        ticker.start()
+
+    # Always initialize local SQLite tables and start the ticker,
+    # regardless of Turso configuration.
+    init_db()
+    ticker.start()
+
+    turso_configured = bool(os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"))
+    if turso_configured:
         _keepalive_task = asyncio.create_task(_keepalive_loop())
-        # Immediately tick all running instances on startup (covers gap when service was asleep)
-        try:
-            instances = engine.list_instances()
-            for inst in instances:
-                if inst.status == InstanceStatus.RUNNING:
-                    try:
-                        engine.tick(inst.instance_id)
-                    except Exception:
-                        pass
-            logger.info("Startup tick complete for %d running instances", sum(1 for i in instances if i.status == InstanceStatus.RUNNING))
-        except Exception as e:
-            logger.warning("Startup tick failed: %s", e)
-        # Pre-warm OHLCV cache in background so first real tick is fast
-        try:
-            engine.prewarm_cache()
-            logger.info("Cache pre-warm started")
-        except Exception as e:
-            logger.warning("Cache pre-warm failed: %s", e)
+    # Immediately tick all running instances on startup (covers gap when service was asleep)
+    try:
+        instances = engine.list_instances()
+        for inst in instances:
+            if inst.status == InstanceStatus.RUNNING:
+                try:
+                    engine.tick(inst.instance_id)
+                except Exception:
+                    pass
+        logger.info("Startup tick complete for %d running instances", sum(1 for i in instances if i.status == InstanceStatus.RUNNING))
+    except Exception as e:
+        logger.warning("Startup tick failed: %s", e)
+    # Pre-warm OHLCV cache in background so first real tick is fast
+    try:
+        engine.prewarm_cache()
+        logger.info("Cache pre-warm started")
+    except Exception as e:
+        logger.warning("Cache pre-warm failed: %s", e)
     yield
     if _keepalive_task:
         _keepalive_task.cancel()
@@ -73,8 +77,7 @@ async def lifespan(app):
             await _keepalive_task
         except asyncio.CancelledError:
             pass
-    if configured:
-        await ticker.stop()
+    await ticker.stop()
 
 
 app = FastAPI(lifespan=lifespan, title="QuantGene Paper Trading")
@@ -143,12 +146,11 @@ def ping():
 @app.get("/health")
 def health():
     import os, sys
-    configured = bool(os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN"))
-    count = len(engine.list_instances()) if configured else 0
+    count = len(engine.list_instances())
     return {
         "status": "ok",
         "instances": count,
-        "turso_configured": configured,
+        "turso_configured": bool(os.environ.get("TURSO_URL") and os.environ.get("TURSO_TOKEN")),
         "debug": {
             "engine_type": type(engine).__name__,
             "engine_module": type(engine).__module__,
