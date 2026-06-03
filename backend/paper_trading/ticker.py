@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import logging
+import time
 from paper_trading.engine import PaperTradingEngine
 from paper_trading.models import InstanceStatus
 
@@ -33,27 +34,27 @@ class PaperTicker:
             self._task = None
         logger.info("PaperTicker stopped")
 
-    _BAR_SEC = {"1d": 86400, "1h": 3600, "30m": 1800, "15m": 900, "5m": 300, "1m": 60}
-
     async def _loop(self):
         loop = asyncio.get_event_loop()
+        last_tick: dict[str, float] = {}
         while self._running:
             try:
-                # Run list_instances in thread pool so the event loop is never blocked
                 instances = await loop.run_in_executor(_TICKER_POOL, self._engine.list_instances)
-                intervals = []
                 tick_tasks = []
+                now = time.time()
                 for inst in instances:
                     if inst.status != InstanceStatus.RUNNING or not inst.auto_tick:
                         continue
+                    last = last_tick.get(inst.instance_id, 0)
+                    if now - last < inst.tick_interval_sec:
+                        continue
+                    last_tick[inst.instance_id] = now
                     tick_tasks.append(
                         loop.run_in_executor(_TICKER_POOL, self._engine.tick, inst.instance_id)
                     )
-                    bar_sec = self._BAR_SEC.get(inst.timeframe or "1d", 86400)
-                    intervals.append(min(inst.tick_interval_sec, bar_sec))
                 if tick_tasks:
                     await asyncio.gather(*tick_tasks, return_exceptions=True)
-                sleep_sec = min(intervals) if intervals else 60
+                sleep_sec = 5
             except Exception as e:
                 logger.warning("PaperTicker tick error: %s", e)
                 sleep_sec = 60

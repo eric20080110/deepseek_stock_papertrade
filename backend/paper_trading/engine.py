@@ -360,7 +360,7 @@ class PaperTradingEngine:
         # when both internal PaperTicker and external /tick endpoint fire simultaneously
         now = time.time()
         last_tick = ctx.get("_last_tick_ts", 0)
-        cooldown = max(30, inst.tick_interval_sec // 2) if inst.tick_interval_sec else 30
+        cooldown = 30
         if now - last_tick < cooldown:
             return {"instance_id": instance_id, "events": [], "skipped": True}
         ctx["_last_tick_ts"] = now
