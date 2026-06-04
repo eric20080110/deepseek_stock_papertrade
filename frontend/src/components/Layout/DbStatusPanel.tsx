@@ -135,7 +135,7 @@ export function DbStatusPanel() {
             {Object.entries(status.local.rows).map(([k, v]) => (
               <div key={k} className="flex justify-between">
                 <span className="text-gray-400">{ROW_LABELS[k] ?? k}</span>
-                <span className="tabular-nums">{v.toLocaleString()}</span>
+                <span className="tabular-nums">{(v ?? 0).toLocaleString()}</span>
               </div>
             ))}
           </div>
@@ -145,7 +145,7 @@ export function DbStatusPanel() {
               {Object.entries(status.turso.rows).map(([k, v]) => (
                 <div key={k} className="flex justify-between">
                   <span className="text-gray-400">{ROW_LABELS[k] ?? k}</span>
-                  <span className="tabular-nums">{v.toLocaleString()}</span>
+                  <span className="tabular-nums">{(v ?? 0).toLocaleString()}</span>
                 </div>
               ))}
             </div>

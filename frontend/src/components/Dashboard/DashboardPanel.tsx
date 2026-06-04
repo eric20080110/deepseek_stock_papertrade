@@ -120,14 +120,14 @@ export function DashboardPanel() {
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="border rounded-lg bg-white p-5">
           <div className="text-xs text-gray-500 mb-2">模擬總權益</div>
-          <div className="text-2xl font-bold">${stats.paper.total_equity.toLocaleString()}</div>
+          <div className="text-2xl font-bold">${(stats.paper.total_equity ?? 0).toLocaleString()}</div>
           <div className={`text-sm mt-1 ${stats.paper.total_return_pct >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
             {stats.paper.total_return_pct >= 0 ? '+' : ''}{stats.paper.total_return_pct}% 總報酬率
           </div>
         </div>
         <div className="border rounded-lg bg-white p-5">
           <div className="text-xs text-gray-500 mb-2">實盤總權益</div>
-          <div className="text-2xl font-bold">${stats.live.total_equity.toLocaleString()}</div>
+          <div className="text-2xl font-bold">${(stats.live.total_equity ?? 0).toLocaleString()}</div>
         </div>
       </div>
 

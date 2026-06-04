@@ -71,7 +71,7 @@ export function MonteCarloPanel({ taskId, sid }: Props) {
         </div>
         <div className="p-2 bg-gray-50 rounded">
           <div className="text-gray-400">中位數最終權益</div>
-          <div className="font-bold">${result.median_final_equity.toLocaleString()}</div>
+          <div className="font-bold">${(result.median_final_equity ?? 0).toLocaleString()}</div>
         </div>
       </div>
     </div>
