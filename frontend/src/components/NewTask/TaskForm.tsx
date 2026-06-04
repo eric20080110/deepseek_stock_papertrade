@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import { useTaskStore } from '../../store/taskStore'
 import type { StrategyConfig } from '../../types/strategy'
 import { SymbolInput } from './SymbolInput'
+import { SchedulePanel } from './SchedulePanel'
 
 const TF_LABELS: Record<string, string> = {
   '1d': '日 K', '1h': '小時 K', '30m': '30 分 K',
@@ -40,6 +41,8 @@ export function TaskForm() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [isRotation, setIsRotation] = useState(false)
   const [rotationSymbols, setRotationSymbols] = useState<string[]>([])
+  const [walkForwardWindows, setWalkForwardWindows] = useState(1)
+  const [mode, setMode] = useState<'create' | 'schedule'>('create')
 
   const addTask = useTaskStore((s) => s.addTask)
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
@@ -73,7 +76,7 @@ export function TaskForm() {
     if (!strategyId) { setIsRotation(false); setRotationSymbols([]); return }
     fetch(`/strategies/${strategyId}`)
       .then((r) => r.json())
-      .then((s: any) => {
+      .then((s: { is_rotation?: boolean; rotation_symbols?: string[] }) => {
         setIsRotation(s.is_rotation ?? false)
         setRotationSymbols(s.rotation_symbols ?? [])
         if (s.is_rotation) setTimeframe('1d')
@@ -106,7 +109,7 @@ export function TaskForm() {
     if (!strategyId || (!isRotation && symbols.length === 0) || !startDate || !endDate) return
     setSaving(true)
     try {
-      const body: Record<string, any> = {
+      const body: Record<string, unknown> = {
         strategy_config_id: strategyId,
         symbols: isRotation ? [] : symbols,
         start_date: startDate,
@@ -117,6 +120,7 @@ export function TaskForm() {
         crossover_rate: crossoverRate,
         mutation_rate: mutationRate,
         early_stop_generations: earlyStop,
+        walk_forward_windows: walkForwardWindows,
       }
       if (seedParams) body.seed_params = seedParams
       const res = await fetch('/tasks', {
@@ -145,6 +149,25 @@ export function TaskForm() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setMode('create')}
+          className={`px-4 py-2 text-sm rounded-lg cursor-pointer ${mode === 'create' ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}
+        >
+          建立任務
+        </button>
+        <button
+          onClick={() => setMode('schedule')}
+          className={`px-4 py-2 text-sm rounded-lg cursor-pointer ${mode === 'schedule' ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}
+        >
+          任務排程
+        </button>
+      </div>
+
+      {mode === 'schedule' ? (
+        <SchedulePanel />
+      ) : (
+        <>
       <h1 className="text-2xl font-bold mb-6">
         {seedParams ? '繼續演化（種子繁衍）' : '新增演化任務'}
       </h1>
@@ -273,6 +296,29 @@ export function TaskForm() {
             <input type="number" min={3} max={50} value={earlyStop} onChange={(e) => setEarlyStop(+e.target.value)}
               className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">驗證模式</label>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setWalkForwardWindows(1)}
+                className={`flex-1 px-3 py-2.5 text-sm rounded-lg border-2 transition-all cursor-pointer ${
+                  walkForwardWindows === 1
+                    ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                }`}>
+                <div className="font-medium">標準模式</div>
+                <div className="text-xs mt-0.5 opacity-70">單一 70/30 分割，訓練資料量大</div>
+              </button>
+              <button type="button" onClick={() => setWalkForwardWindows(3)}
+                className={`flex-1 px-3 py-2.5 text-sm rounded-lg border-2 transition-all cursor-pointer ${
+                  walkForwardWindows === 3
+                    ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                }`}>
+                <div className="font-medium">滾動驗證</div>
+                <div className="text-xs mt-0.5 opacity-70">3 窗口 Walk-Forward，抗過擬合</div>
+              </button>
+            </div>
+          </div>
         </div>
 
         <button onClick={() => setAdvanced(!advanced)} className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer">
@@ -297,6 +343,7 @@ export function TaskForm() {
               <p>策略：{strategies.find(s => s.config_id === strategyId)?.name}</p>
               <p>標的：{isRotation ? `輪換 (${rotationSymbols.join(', ')})` : symbols.join(', ')}</p>
               <p>週期：{TF_LABELS[timeframe] || timeframe}</p>
+              <p>驗證：{walkForwardWindows === 1 ? '標準 70/30' : `Walk-Forward ${walkForwardWindows} 窗口`}</p>
               <p>族群：{popSize} ｜ 世代：{maxGens}</p>
               <div className="mt-3 pt-3 border-t space-y-1">
                 {estimate ? (
@@ -336,6 +383,8 @@ export function TaskForm() {
           </div>
         </div>
       )}
+    </>
+    )}
     </div>
   )
 }

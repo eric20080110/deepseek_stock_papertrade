@@ -18,6 +18,9 @@ export default defineConfig({
       '/gene-pool': { target: 'http://localhost:8000', ws: true },
       '/system': { target: 'http://localhost:8000', ws: true },
       '/symbols': { target: 'http://localhost:8000', ws: true },
+      '/dashboard': { target: 'http://localhost:8000', ws: true },
+      '/schedules': { target: 'http://localhost:8000', ws: true },
+      '/notifications': { target: 'http://localhost:8000', ws: true },
     },
   },
 })

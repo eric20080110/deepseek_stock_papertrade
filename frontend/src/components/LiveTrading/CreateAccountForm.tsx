@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useTaskStore } from '../../store/taskStore'
+import type { StrategyConfig } from '../../types/strategy'
 
 export function CreateAccountForm() {
   const [name, setName] = useState('')
   const [strategyId, setStrategyId] = useState('')
-  const [strategies, setStrategies] = useState<any[]>([])
+  const [strategies, setStrategies] = useState<StrategyConfig[]>([])
   const [symbolInput, setSymbolInput] = useState('')
   const [symbols, setSymbols] = useState<string[]>([])
   const [capital, setCapital] = useState(10000)
@@ -20,14 +21,14 @@ export function CreateAccountForm() {
   useEffect(() => {
     fetch('/strategies')
       .then((r) => r.json())
-      .then((data: any[]) => setStrategies(data.filter((s) => !s.is_template)))
+      .then((data: StrategyConfig[]) => setStrategies(data.filter((s) => !s.is_template)))
   }, [])
 
   useEffect(() => {
     if (strategyId) {
       fetch(`/strategies/${strategyId}`)
         .then((r) => r.json())
-        .then((s: any) => {
+        .then((s: StrategyConfig) => {
           const defaults: Record<string, string> = {}
           for (const p of s.parameters) {
             defaults[p.name] = String(p.default ?? '')
@@ -53,7 +54,7 @@ export function CreateAccountForm() {
     if (!name || !strategyId || (!isRotation && symbols.length === 0)) return
     setSaving(true)
     try {
-      const parsedParams: Record<string, any> = {}
+      const parsedParams: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(params)) {
         const num = Number(v)
         parsedParams[k] = isNaN(num) ? v : num
@@ -97,7 +98,7 @@ export function CreateAccountForm() {
         <select value={strategyId} onChange={(e) => setStrategyId(e.target.value)}
           className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-rose-500">
           <option value="">選擇策略...</option>
-          {strategies.map((s: any) => <option key={s.config_id} value={s.config_id}>{s.name}</option>)}
+          {strategies.map((s: StrategyConfig) => <option key={s.config_id} value={s.config_id}>{s.name}</option>)}
         </select>
       </div>
 

@@ -9,8 +9,14 @@ services:
       LOCAL_DB_PATH: /app/data/quantgene_local.db
     volumes:
       - ./data:/app/data         # persistent SQLite + parquet cache
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   frontend:
     build:

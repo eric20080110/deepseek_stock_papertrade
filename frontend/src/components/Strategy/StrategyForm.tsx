@@ -75,7 +75,8 @@ export function StrategyForm({ templateId, configId, onSave, onCancel }: Props) 
         if (!names.includes(c.controller)) errs[`cat_controller_${c.controller}`] = `群組控制器「${c.controller}」不存在`
         const catParam = params.find((p) => p.name === c.controller)
         if (catParam && catParam.type === 'categorical' && 'options' in catParam) {
-          for (const opt of (catParam as any).options) {
+          const catOptions = (catParam as Extract<ParamDef, { type: 'categorical' }>).options
+          for (const opt of catOptions) {
             if (c.groups[opt]) {
               for (const gp of c.groups[opt]) {
                 if (!names.includes(gp)) errs[`cat_group_param_${gp}`] = `群組參數「${gp}」不存在`
@@ -100,8 +101,8 @@ export function StrategyForm({ templateId, configId, onSave, onCancel }: Props) 
         await api.createStrategy({ template_id: templateId, name, description, parameters: params, constraints })
       }
       onSave()
-    } catch (e: any) {
-      toast.error(e.message)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e))
     }
     setSaving(false)
   }

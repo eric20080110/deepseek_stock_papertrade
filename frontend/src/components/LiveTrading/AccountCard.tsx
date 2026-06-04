@@ -6,8 +6,23 @@ const statusColors: Record<string, string> = {
   ERROR: 'bg-red-500',
 }
 
+export interface LiveInstance {
+  instance_id: string
+  name: string
+  status: string
+  symbols: string | string[]
+  initial_capital: number
+  total_equity: number
+  unrealized_pnl: number
+  total_return: number
+  schedule_time?: string
+  params_json?: string
+  trade_count?: number
+  win_rate?: number
+}
+
 interface Props {
-  instance: any
+  instance: LiveInstance
   onView: (id: string) => void
 }
 

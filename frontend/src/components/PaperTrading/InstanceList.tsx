@@ -1,20 +1,18 @@
 import { useEffect, useState } from 'react'
 import { InstanceCard } from './InstanceCard'
-import { PageLoading } from '../LoadingSpinner'
+import type { PaperInstance } from './InstanceCard'
 
 interface Props {
   onViewDetail: (id: string) => void
 }
 
 export function InstanceList({ onViewDetail }: Props) {
-  const [instances, setInstances] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  const [instances, setInstances] = useState<PaperInstance[]>([])
 
   useEffect(() => {
     fetch('/paper-trading')
       .then((r) => r.json())
       .then(setInstances)
-      .finally(() => setLoading(false))
   }, [])
 
   return (

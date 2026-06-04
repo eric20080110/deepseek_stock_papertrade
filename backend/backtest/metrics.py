@@ -75,6 +75,70 @@ def compute_profit_factor(trades: list) -> float:
     return round(gross_profit / gross_loss, 4)
 
 
+def compute_var(equity_curve: list[float], confidence: float = 0.95) -> float:
+    if len(equity_curve) < 2: return 0.0
+    series = pd.Series(equity_curve)
+    returns = series.pct_change().dropna()
+    if len(returns) < 2: return 0.0
+    return float(np.percentile(returns, (1 - confidence) * 100))
+
+
+def compute_cvar(equity_curve: list[float], confidence: float = 0.95) -> float:
+    if len(equity_curve) < 2: return 0.0
+    series = pd.Series(equity_curve)
+    returns = series.pct_change().dropna()
+    if len(returns) < 2: return 0.0
+    var = compute_var(equity_curve, confidence)
+    return float(returns[returns <= var].mean())
+
+
+import random as _random
+
+
+def run_monte_carlo(
+    equity_curve: list[float],
+    n_simulations: int = 1000,
+    confidence: float = 0.95,
+    seed: int = 42,
+) -> dict:
+    if len(equity_curve) < 10:
+        return {"error": "equity curve too short"}
+    rng = _random.Random(seed)
+    series = pd.Series(equity_curve)
+    returns = series.pct_change().dropna().values
+    if len(returns) < 5:
+        return {"error": "not enough returns"}
+
+    final_equities = []
+    for _ in range(n_simulations):
+        sim_returns = rng.choices(list(returns), k=len(returns))
+        sim_equity = equity_curve[0]
+        for r in sim_returns:
+            sim_equity *= (1 + r)
+        final_equities.append(sim_equity)
+
+    final_equities.sort()
+    lower_idx = int(n_simulations * (1 - confidence) / 2)
+    upper_idx = int(n_simulations * (1 + confidence) / 2)
+
+    initial = equity_curve[0]
+    total_returns = [(e / initial - 1) * 100 for e in final_equities]
+
+    return {
+        "n_simulations": n_simulations,
+        "confidence": confidence,
+        "median_final_equity": round(float(np.median(final_equities)), 2),
+        "median_return_pct": round(float(np.median(total_returns)), 2),
+        "mean_return_pct": round(float(np.mean(total_returns)), 2),
+        "std_return_pct": round(float(np.std(total_returns)), 2),
+        "ci_lower_return": round(total_returns[lower_idx], 2),
+        "ci_upper_return": round(total_returns[upper_idx], 2),
+        "prob_positive": round(sum(1 for r in total_returns if r > 0) / n_simulations * 100, 1),
+        "prob_double": round(sum(1 for r in total_returns if r > 100) / n_simulations * 100, 1),
+        "prob_half_loss": round(sum(1 for r in total_returns if r < -50) / n_simulations * 100, 1),
+    }
+
+
 def compute_metrics(
     equity_curve: list[float], trades: list, total_bars: int, bars_per_year: int = 365
 ) -> dict[str, float]:
@@ -92,4 +156,6 @@ def compute_metrics(
         "win_rate": compute_win_rate(trades),
         "profit_factor": compute_profit_factor(trades),
         "trade_count": len(trades),
+        "var_95": round(compute_var(equity_curve, 0.95), 6),
+        "cvar_95": round(compute_cvar(equity_curve, 0.95), 6),
     }

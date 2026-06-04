@@ -4,9 +4,17 @@ interface Props {
   taskId: string
 }
 
+interface IndividualRecord {
+  params_json?: string
+  cagr?: number
+  max_drawdown?: number
+  sharpe_ratio?: number
+  [key: string]: unknown
+}
+
 export function ParamHeatmap({ taskId }: Props) {
   const chartRef = useRef<HTMLDivElement>(null)
-  const [individuals, setIndividuals] = useState<any[]>([])
+  const [individuals, setIndividuals] = useState<IndividualRecord[]>([])
   const [metric, setMetric] = useState('cagr')
 
   useEffect(() => {
@@ -17,21 +25,22 @@ export function ParamHeatmap({ taskId }: Props) {
 
   const renderHeatmap = () => {
     if (!chartRef.current || individuals.length === 0) return
-    const Plotly = (window as any).Plotly
+    const Plotly = (window as unknown as Record<string, unknown>).Plotly as
+      { newPlot: (el: HTMLElement, data: Record<string, unknown>[], layout: Record<string, unknown>, config: Record<string, unknown>) => void } | undefined
     if (!Plotly) return
 
-    const params = individuals[0]?.params_json ? JSON.parse(individuals[0].params_json) : {}
+    const params = individuals[0]?.params_json ? JSON.parse(individuals[0].params_json) as Record<string, unknown> : {}
     const paramNames = Object.keys(params).slice(0, 8)
     if (paramNames.length === 0) return
 
     const bins = 5
-    const data: any[] = []
+    const data: Record<string, unknown>[] = []
 
     for (let i = 0; i < paramNames.length; i++) {
       const name = paramNames[i]
       const vals = individuals.map((ind) => {
-        const p = ind.params_json ? JSON.parse(ind.params_json) : {}
-        return { val: p[name], metric: ind[metric] || 0 }
+        const p = ind.params_json ? JSON.parse(ind.params_json) as Record<string, unknown> : {}
+        return { val: p[name], metric: (ind[metric] as number) || 0 }
       }).filter((v) => v.val !== undefined && !isNaN(Number(v.val)))
 
       if (vals.length < 3) continue
@@ -68,7 +77,7 @@ export function ParamHeatmap({ taskId }: Props) {
 
     if (data.length === 0) return
 
-    const layout = {
+    const layout: Record<string, unknown> = {
       margin: { t: 10, r: 80, b: 80, l: 100 },
       height: 400,
       xaxis: { title: '參數' },

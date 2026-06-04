@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
 import { useTaskStore } from '../../store/taskStore'
 import type { ViewType } from '../../types/evolution'
-import { Layers, PlusCircle, List, Activity, BarChart3, Gauge, Dna, Radio } from 'lucide-react'
+import { LayoutDashboard, Layers, PlusCircle, List, Activity, BarChart3, Gauge, Dna, Radio } from 'lucide-react'
 import { DbStatusPanel } from './DbStatusPanel'
+import { NotificationSettings } from './NotificationSettings'
 
 const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
+  { id: 'dashboard', label: '儀表板', icon: <LayoutDashboard className="w-4 h-4" /> },
   { id: 'strategy', label: '策略管理', icon: <Layers className="w-4 h-4" /> },
   { id: 'new-task', label: '新增任務', icon: <PlusCircle className="w-4 h-4" /> },
   { id: 'queue', label: '任務隊列', icon: <List className="w-4 h-4" /> },
@@ -41,6 +42,9 @@ export function Sidebar() {
         ))}
       </nav>
       <DbStatusPanel />
+      <div className="px-3">
+        <NotificationSettings />
+      </div>
       <div className="px-3 pb-3 text-xs text-gray-400 space-y-1">
         {activeTask && (
           <div>

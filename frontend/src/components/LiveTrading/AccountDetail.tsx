@@ -1,13 +1,53 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 
+interface LiveAccount {
+  instance_id: string
+  name: string
+  status: string
+  symbols: string | string[]
+  initial_capital: number
+  total_equity: number
+  unrealized_pnl: number
+  total_return: number
+  schedule_time?: string
+  params_json?: string
+  trade_count?: number
+  win_rate?: number
+}
+
+interface Position {
+  symbol: string
+  side: string
+  qty?: number
+  market_value?: number
+  unrealized_pnl: number
+  change_pct?: number
+}
+
+interface Order {
+  order_id: string
+  created_at: number
+  symbol: string
+  side: string
+  qty: number
+  filled_qty?: number
+  filled_avg_price?: number
+  status: string
+}
+
+interface FlattenResult {
+  symbol: string
+  result: string
+}
+
 interface Props {
   instanceId: string
 }
 
 export function AccountDetail({ instanceId }: Props) {
-  const [instance, setInstance] = useState<any>(null)
-  const [positions, setPositions] = useState<any[]>([])
-  const [orders, setOrders] = useState<any[]>([])
+  const [instance, setInstance] = useState<LiveAccount | null>(null)
+  const [positions, setPositions] = useState<Position[]>([])
+  const [orders, setOrders] = useState<Order[]>([])
   const [equityHistory, setEquityHistory] = useState<{ timestamp: number; equity: number }[]>([])
   const [tab, setTab] = useState<'monitor' | 'orders' | 'params'>('monitor')
   const chartRef = useRef<HTMLDivElement>(null)
@@ -52,7 +92,8 @@ export function AccountDetail({ instanceId }: Props) {
     const data = filteredHistory.length > 0 ? filteredHistory : equityHistory
     if (data.length < 2) {
       if (data.length === 1) {
-        const Plotly = (window as any).Plotly
+        const Plotly = (window as unknown as Record<string, unknown>).Plotly as
+          { newPlot: (el: HTMLElement, data: Record<string, unknown>[], layout: Record<string, unknown>, config: Record<string, unknown>) => void } | undefined
         if (Plotly) {
           Plotly.newPlot(chartRef.current, [{
             x: [new Date(data[0].timestamp * 1000)], y: [data[0].equity],
@@ -67,7 +108,8 @@ export function AccountDetail({ instanceId }: Props) {
       }
       return
     }
-    const Plotly = (window as any).Plotly
+    const Plotly = (window as unknown as Record<string, unknown>).Plotly as
+      { newPlot: (el: HTMLElement, data: Record<string, unknown>[], layout: Record<string, unknown>, config: Record<string, unknown>) => void } | undefined
     if (!Plotly) return
     Plotly.newPlot(chartRef.current, [{
       x: data.map((e) => new Date(e.timestamp * 1000)),
@@ -108,7 +150,7 @@ export function AccountDetail({ instanceId }: Props) {
       const res = await fetch(`/live-trading/${instanceId}/flatten`, { method: 'POST' })
       const data = await res.json()
       if (data.results) {
-        alert(data.results.map((r: any) => `${r.symbol}: ${r.result}`).join('\n'))
+        alert(data.results.map((r: FlattenResult) => `${r.symbol}: ${r.result}`).join('\n'))
       }
     } catch {
       alert('平倉請求失敗')
@@ -212,7 +254,7 @@ export function AccountDetail({ instanceId }: Props) {
             {positions.length === 0 && (
               <div className="text-center py-6 text-gray-400">目前無持倉</div>
             )}
-            {positions.map((p: any) => (
+            {positions.map((p: Position) => (
               <div key={p.symbol} className="flex items-center justify-between p-3 border rounded-lg bg-white">
                 <div>
                   <span className="font-medium text-sm">{p.symbol}</span>
@@ -273,7 +315,7 @@ export function AccountDetail({ instanceId }: Props) {
               {orders.length === 0 && (
                 <tr><td colSpan={6} className="text-center py-6 text-gray-400">尚無訂單紀錄</td></tr>
               )}
-              {orders.map((o: any) => (
+              {orders.map((o: Order) => (
                 <tr key={o.order_id} className="border-t">
                   <td className="p-2 text-xs">{new Date(o.created_at * 1000).toLocaleString()}</td>
                   <td className="p-2 text-xs">{o.symbol}</td>

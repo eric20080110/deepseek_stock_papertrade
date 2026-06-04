@@ -5,6 +5,7 @@ import { MainContent } from './components/Layout/MainContent'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { ToastContainer } from './components/ToastContainer'
 import { useTaskStore } from './store/taskStore'
+import type { EvolutionTask } from './types/evolution'
 
 function App() {
   const setTasks = useTaskStore((s) => s.setTasks)
@@ -21,7 +22,7 @@ function App() {
           const terminalById = new Map(
             current.filter((t) => TERMINAL.has(t.status)).map((t) => [t.task_id, t])
           )
-          const merged = (data as any[]).map((t) =>
+          const merged = (data as EvolutionTask[]).map((t) =>
             TERMINAL.has(t.status) || !terminalById.has(t.task_id) ? t : terminalById.get(t.task_id)!
           )
           setTasks(merged)

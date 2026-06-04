@@ -38,13 +38,11 @@ export function ParamRow({ param, allParamNames, onChange, onDelete }: Props) {
       <select
         value={param.type}
         onChange={(e) => {
-          const t = e.target.value
-          let base: any = { name: param.name, type: t }
-          if (t === 'continuous') base = { ...base, min: 0, max: 1, default: 0.5, scale: 'linear' }
-          else if (t === 'integer') base = { ...base, min: 1, max: 100, step: 1, default: 10 }
-          else if (t === 'categorical') base = { ...base, options: ['A', 'B'], default: 'A' }
-          else base = { ...base, default: false, controls: [] }
-          onChange(base as ParamDef)
+          const t = e.target.value as ParamDef['type']
+          if (t === 'continuous') onChange({ name: param.name, type: 'continuous' as const, min: 0, max: 1, default: 0.5, scale: 'linear' })
+          else if (t === 'integer') onChange({ name: param.name, type: 'integer' as const, min: 1, max: 100, step: 1, default: 10 })
+          else if (t === 'categorical') onChange({ name: param.name, type: 'categorical' as const, options: ['A', 'B'], default: 'A' })
+          else onChange({ name: param.name, type: 'boolean' as const, default: false, controls: [] })
         }}
         className="px-2 py-1 border rounded text-xs outline-none"
       >

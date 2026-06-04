@@ -8,7 +8,20 @@ export function IndividualDrawer() {
   const taskId = useTaskStore((s) => s.selectedAnalysisTaskId)
   const setSeedParams = useTaskStore((s) => s.setSeedParams)
   const setCurrentView = useTaskStore((s) => s.setCurrentView)
-  const [data, setData] = useState<any>(null)
+  interface IndividualDetail {
+    cagr: number
+    max_drawdown?: number
+    sharpe_ratio?: number
+    win_rate?: number
+    profit_factor?: number
+    r2?: number
+    trade_count?: number
+    oos_consistency_score?: number
+    pareto_rank?: number
+    params_json?: string
+  }
+
+  const [data, setData] = useState<IndividualDetail | null>(null)
 
   useEffect(() => {
     if (!selectedId || !taskId) return

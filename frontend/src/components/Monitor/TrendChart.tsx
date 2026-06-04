@@ -1,10 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { GenerationResult } from '../../types/evolution'
 
-declare global {
-  interface Window { Plotly: any }
-}
-
 interface Props {
   history: GenerationResult[]
 }
@@ -14,7 +10,8 @@ export function TrendChart({ history }: Props) {
 
   useEffect(() => {
     if (!chartRef.current || history.length === 0) return
-    const Plotly = (window as any).Plotly
+    const Plotly = (window as unknown as Record<string, unknown>).Plotly as
+      { newPlot: (el: HTMLElement, data: Record<string, unknown>[], layout: Record<string, unknown>, config: Record<string, unknown>) => void } | undefined
     if (!Plotly) return
 
     const gens = history.map((g) => g.generation)
@@ -25,14 +22,14 @@ export function TrendChart({ history }: Props) {
       g.population_size > 0 ? (g.passed_dynamic / g.population_size) * 100 : 0
     )
 
-    const data = [
+    const data: Record<string, unknown>[] = [
       { x: gens, y: cagr, type: 'scatter', mode: 'lines+markers', name: '最高 CAGR %', line: { color: '#059669' } },
       { x: gens, y: dd, type: 'scatter', mode: 'lines+markers', name: '最低回撤 %', yaxis: 'y2', line: { color: '#dc2626' } },
       { x: gens, y: sharpe, type: 'scatter', mode: 'lines+markers', name: '最高 Sharpe', yaxis: 'y3', line: { color: '#2563eb' } },
       { x: gens, y: passRate, type: 'scatter', mode: 'lines', name: '通過率 %', line: { color: '#d1d5db', dash: 'dot' }, fill: 'tozeroy' },
     ]
 
-    const layout: any = {
+    const layout: Record<string, unknown> = {
       margin: { t: 20, r: 60, b: 40, l: 60 },
       height: 300,
       showlegend: true,

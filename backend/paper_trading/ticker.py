@@ -36,7 +36,7 @@ class PaperTicker:
 
     async def _loop(self):
         loop = asyncio.get_event_loop()
-        last_tick: dict[str, float] = {}
+        next_tick: dict[str, float] = {}
         while self._running:
             try:
                 instances = await loop.run_in_executor(_TICKER_POOL, self._engine.list_instances)
@@ -45,10 +45,10 @@ class PaperTicker:
                 for inst in instances:
                     if inst.status != InstanceStatus.RUNNING or not inst.auto_tick:
                         continue
-                    last = last_tick.get(inst.instance_id, 0)
-                    if now - last < inst.tick_interval_sec:
+                    next_ts = next_tick.get(inst.instance_id, 0.0)
+                    if now < next_ts:
                         continue
-                    last_tick[inst.instance_id] = now
+                    next_tick[inst.instance_id] = now + inst.tick_interval_sec
                     tick_tasks.append(
                         loop.run_in_executor(_TICKER_POOL, self._engine.tick, inst.instance_id)
                     )

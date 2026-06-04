@@ -61,7 +61,7 @@ export function useWebSocket(taskId: string | null) {
             doneRef.current = true
             ws.close()
           }
-        } catch {}
+        } catch { /* ignore parse errors */ }
       }
 
       ws.onclose = () => {

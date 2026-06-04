@@ -11,3 +11,12 @@ quantom/
 *.db-wal
 *.db-shm
 *.db
+.pytest_cache/
+.vscode/
+.idea/
+*.log
+*.swp
+*.swo
+*.db.bak
+*.bak
+paper_data_export.json

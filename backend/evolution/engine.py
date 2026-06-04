@@ -164,7 +164,7 @@ class EvolutionEngine:
 
         data_map = {}
         _t0 = time.perf_counter()
-        for sym in symbols:
+        for i, sym in enumerate(symbols):
             df = DATA_CACHE.ensure(
                 sym,
                 timeframe=timeframe,
@@ -174,6 +174,8 @@ class EvolutionEngine:
             if df is not None:
                 DATA_CACHE.store(sym, df, timeframe=timeframe)
                 data_map[sym] = df
+            if i < len(symbols) - 1:
+                time.sleep(1.5)  # yfinance rate limiting: 1.5s between requests
         _t1 = time.perf_counter()
         _plog(f"Data fetch for {len(symbols)} symbols: {_t1-_t0:.2f}s")
 
@@ -272,7 +274,7 @@ class EvolutionEngine:
                 front_data = [
                     {"id": s.strategy_id, "cagr": s.objective_vector.cagr,
                      "dd": s.objective_vector.max_drawdown, "sharpe": s.objective_vector.sharpe,
-                     "oos": s.oos_consistency_score}
+                     "oos": s.oos_consistency_score, "final_score": s.final_score}
                     for s in front
                 ]
 
@@ -293,6 +295,8 @@ class EvolutionEngine:
                         "r2": s.threshold_metrics.r2,
                         "trade_count": s.threshold_metrics.trade_count,
                         "oos_consistency_score": s.oos_consistency_score,
+                        "final_score": s.final_score,
+                        "overfit_penalty": s.overfit_penalty,
                         "passed_absolute": s.passed_absolute_threshold,
                         "passed_dynamic": s.passed_dynamic_threshold,
                         "elimination_reason": s.elimination_reason,

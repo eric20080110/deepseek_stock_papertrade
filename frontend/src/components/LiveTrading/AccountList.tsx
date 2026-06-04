@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { AccountCard } from './AccountCard'
+import type { LiveInstance } from './AccountCard'
 
 interface Props {
   onViewDetail: (id: string) => void
 }
 
 export function AccountList({ onViewDetail }: Props) {
-  const [instances, setInstances] = useState<any[]>([])
+  const [instances, setInstances] = useState<LiveInstance[]>([])
 
   useEffect(() => {
     const load = () => {

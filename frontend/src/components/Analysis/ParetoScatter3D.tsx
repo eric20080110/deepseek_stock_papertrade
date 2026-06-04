@@ -11,27 +11,28 @@ export function ParetoScatter3D({ taskId }: Props) {
 
   useEffect(() => {
     if (!chartRef.current) return
-    const Plotly = (window as any).Plotly
+    const Plotly = (window as unknown as Record<string, unknown>).Plotly as
+      { newPlot: (el: HTMLElement, data: Record<string, unknown>[], layout: Record<string, unknown>, config: Record<string, unknown>) => void } | undefined
     if (!Plotly) return
 
     fetch(`/tasks/${taskId}/charts/pareto-scatter?last_only=true`)
       .then((r) => r.json())
-      .then((all: any[]) => {
+      .then((all: Record<string, unknown>[]) => {
         if (all.length === 0) return
         const el = chartRef.current
         if (!el) return
         const front = all.filter((p) => p.pareto_rank === 1)
         const dominated = all.filter((p) => p.pareto_rank !== 1)
 
-        const traces = []
+        const traces: Record<string, unknown>[] = []
         if (dominated.length > 0) {
           traces.push({
-            x: dominated.map((p) => p.cagr * 100),
+            x: dominated.map((p) => (p.cagr as number) * 100),
             y: dominated.map((p) => p.dd),
             z: dominated.map((p) => p.sharpe),
             customdata: dominated.map((p) => p.id),
             text: dominated.map((p) =>
-              `Gen ${p.generation}<br>ID: ${p.id.substring(0, 8)}<br>CAGR: ${(p.cagr * 100).toFixed(2)}%<br>DD: ${p.dd.toFixed(2)}%<br>Sharpe: ${p.sharpe.toFixed(2)}<br>Rank: ${p.pareto_rank ?? '-'}`
+              `Gen ${p.generation}<br>ID: ${(p.id as string).substring(0, 8)}<br>CAGR: ${((p.cagr as number) * 100).toFixed(2)}%<br>DD: ${(p.dd as number).toFixed(2)}%<br>Sharpe: ${(p.sharpe as number).toFixed(2)}<br>Rank: ${p.pareto_rank ?? '-'}`
             ),
             mode: 'markers',
             type: 'scatter3d',
@@ -42,12 +43,12 @@ export function ParetoScatter3D({ taskId }: Props) {
         }
         if (front.length > 0) {
           traces.push({
-            x: front.map((p) => p.cagr * 100),
+            x: front.map((p) => (p.cagr as number) * 100),
             y: front.map((p) => p.dd),
             z: front.map((p) => p.sharpe),
             customdata: front.map((p) => p.id),
             text: front.map((p) =>
-              `Gen ${p.generation}<br>ID: ${p.id.substring(0, 8)}<br>CAGR: ${(p.cagr * 100).toFixed(2)}%<br>DD: ${p.dd.toFixed(2)}%<br>Sharpe: ${p.sharpe.toFixed(2)}<br>OOS: ${p.oos.toFixed(3)}`
+              `Gen ${p.generation}<br>ID: ${(p.id as string).substring(0, 8)}<br>CAGR: ${((p.cagr as number) * 100).toFixed(2)}%<br>DD: ${(p.dd as number).toFixed(2)}%<br>Sharpe: ${(p.sharpe as number).toFixed(2)}<br>OOS: ${(p.oos as number).toFixed(3)}`
             ),
             mode: 'markers',
             type: 'scatter3d',
@@ -63,7 +64,7 @@ export function ParetoScatter3D({ taskId }: Props) {
           })
         }
 
-        const layout = {
+        const layout: Record<string, unknown> = {
           margin: { t: 10, r: 10, b: 40, l: 50 },
           height: 500,
           scene: {
@@ -76,10 +77,10 @@ export function ParetoScatter3D({ taskId }: Props) {
 
         Plotly.newPlot(el, traces, layout, { responsive: true, displayModeBar: false })
 
-        el.on('plotly_click', (eventData: any) => {
-          const pt = eventData?.points?.[0]
+        ;(el as unknown as { on: (e: string, h: (d: Record<string, unknown>) => void) => void }).on('plotly_click', (eventData: Record<string, unknown>) => {
+          const pt = (eventData?.points as Record<string, unknown>[] | undefined)?.[0]
           if (!pt) return
-          const id = pt.customdata
+          const id = pt.customdata as string | undefined
           if (id) setSelectedIndividualId(id)
         })
       })

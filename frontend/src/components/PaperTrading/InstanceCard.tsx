@@ -6,8 +6,22 @@ const statusColors: Record<string, string> = {
   FAILED: 'bg-red-500',
 }
 
+export interface PaperInstance {
+  instance_id: string
+  name: string
+  status: string
+  source?: string
+  symbols: string | string[]
+  total_return: number
+  trade_count: number
+  timeframe: string
+  started_at?: number
+  stopped_at?: number
+  params_json?: string
+}
+
 interface Props {
-  instance: any
+  instance: PaperInstance
   onView: (id: string) => void
 }
 
@@ -45,6 +59,21 @@ export function InstanceCard({ instance, onView }: Props) {
 
   const symbols = typeof instance.symbols === 'string' ? JSON.parse(instance.symbols) : instance.symbols
 
+  function formatUptime(started?: number, stopped?: number): string {
+    if (!started) return '-'
+    const end = stopped ?? Date.now() / 1000
+    const sec = Math.max(0, Math.floor(end - started))
+    if (sec < 60) return `${sec}s`
+    const min = Math.floor(sec / 60)
+    if (min < 60) return `${min}m`
+    const hr = Math.floor(min / 60)
+    const remMin = min % 60
+    if (hr < 24) return `${hr}h ${remMin}m`
+    const day = Math.floor(hr / 24)
+    const remHr = hr % 24
+    return `${day}d ${remHr}h`
+  }
+
   return (
     <div className="border rounded-xl p-5 bg-white hover:shadow-md transition-shadow">
       <div className="flex items-center gap-2 mb-3">
@@ -74,8 +103,8 @@ export function InstanceCard({ instance, onView }: Props) {
           <div className="text-base font-bold">{instance.trade_count}</div>
         </div>
         <div>
-          <div className="text-xs text-gray-400">精度</div>
-          <div className="text-base font-bold">{instance.timeframe || '-'}</div>
+          <div className="text-xs text-gray-400">運行時間</div>
+          <div className="text-base font-bold">{formatUptime(instance.started_at, instance.status === 'STOPPED' ? instance.stopped_at : undefined)}</div>
         </div>
       </div>
 
@@ -108,7 +137,7 @@ export function InstanceCard({ instance, onView }: Props) {
             const r = await fetch('/live-trading/from-paper/' + instance.instance_id, { method: 'POST' })
             if (!r.ok) { const e = await r.json(); alert('轉入失敗：' + (e.detail || r.statusText)); return }
             window.location.reload()
-          } catch (e: any) { alert('轉入失敗：' + e.message) }
+          } catch (e: unknown) { alert('轉入失敗：' + (e instanceof Error ? e.message : String(e))) }
         }}
           className="w-full px-3 py-1.5 text-xs border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer">
           + 轉入實盤

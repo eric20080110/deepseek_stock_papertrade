@@ -1,4 +1,4 @@
-import type { StrategyConfig } from '../types/strategy'
+import type { StrategyConfig, ParamDef, ConstraintDef } from '../types/strategy'
 
 const BASE = ''
 
@@ -18,9 +18,9 @@ export const api = {
   listStrategies: () => request<StrategyConfig[]>('/strategies'),
   listTemplates: () => request<StrategyConfig[]>('/strategies/templates'),
   getStrategy: (id: string) => request<StrategyConfig>(`/strategies/${id}`),
-  createStrategy: (data: { template_id: string; name: string; description?: string; parameters?: any[]; constraints?: any[] }) =>
+  createStrategy: (data: { template_id: string; name: string; description?: string; parameters?: ParamDef[]; constraints?: ConstraintDef[] }) =>
     request<StrategyConfig>('/strategies', { method: 'POST', body: JSON.stringify(data) }),
-  updateStrategy: (id: string, data: { name: string; description?: string; parameters: any[]; constraints: any[] }) =>
+  updateStrategy: (id: string, data: { name: string; description?: string; parameters: ParamDef[]; constraints: ConstraintDef[] }) =>
     request<StrategyConfig>(`/strategies/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteStrategy: (id: string) => request<{ detail: string }>(`/strategies/${id}`, { method: 'DELETE' }),
   duplicateStrategy: (id: string) => request<StrategyConfig>(`/strategies/${id}/duplicate`, { method: 'POST' }),

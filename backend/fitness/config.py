@@ -11,6 +11,8 @@ class FitnessSettings:
     abs_r2_min: float = 0.0
     abs_trade_count_min: int = 1
     abs_oos_consistency_min: float = 0.3
+    abs_mc_prob_positive_min: float = 50.0
+    abs_mc_ci_lower_return_min: float = -30.0
     dynamic_elimination_pct: float = 0.2
     elite_survival_rank: int = 1
     parent_pool_ratio: float = 0.5

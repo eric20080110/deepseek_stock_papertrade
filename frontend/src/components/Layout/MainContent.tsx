@@ -7,11 +7,13 @@ import { AnalysisPanel } from '../Analysis/AnalysisPanel'
 import { PaperTradingPanel } from '../PaperTrading/PaperTradingPanel'
 import { LiveTradingPanel } from '../LiveTrading/LiveTradingPanel'
 import { GenePoolPanel } from '../GenePool/GenePoolPanel'
+import { DashboardPanel } from '../Dashboard/DashboardPanel'
 
 export function MainContent() {
   const currentView = useTaskStore((s) => s.currentView)
 
   const views: Record<string, React.ReactNode> = {
+    dashboard: <DashboardPanel />,
     strategy: <StrategyPanel />,
     'new-task': <TaskForm />,
     queue: <TaskList />,

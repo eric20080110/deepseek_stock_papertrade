@@ -100,7 +100,7 @@ def _run_one_rotation(params: dict, sid: str, icap: float) -> Optional[dict]:
     all_syms = rot_symbols + ([spy_sym] if spy_sym not in rot_symbols else [])
     data_map = {}
     for sym in all_syms:
-        df = DATA_CACHE.ensure(sym)
+        df = DATA_CACHE.ensure(sym, timeframe="1d")
         if df is not None:
             data_map[sym] = df
 

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { ChevronDown, ChevronRight, Zap, Star, Pencil, Check, X, Trash2, Eye } from 'lucide-react'
 import { useTaskStore } from '../../store/taskStore'
 import { ChampionDetailDrawer } from './ChampionDetailDrawer'
+import { ChampionRanking } from './ChampionRanking'
 import { PageLoading } from '../LoadingSpinner'
 import { toast } from '../../lib/toast'
 
@@ -52,6 +53,8 @@ export function GenePoolPanel() {
   const [detailChampion, setDetailChampion] = useState<{ taskId: string; sid: string } | null>(null)
   const [editingTaskName, setEditingTaskName] = useState<Record<string, boolean>>({})
   const [draftTaskNames, setDraftTaskNames] = useState<Record<string, string>>({})
+
+  const [viewTab, setViewTab] = useState<'library' | 'ranking'>('library')
 
   // Deploy dialog state
   const [deployTarget, setDeployTarget] = useState<{
@@ -204,6 +207,20 @@ export function GenePoolPanel() {
       </div>
 
       <div className="flex items-center gap-2 mb-4">
+        <button onClick={() => setViewTab('library')}
+          className={`px-3 py-1.5 text-sm rounded-lg cursor-pointer ${viewTab === 'library' ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}>
+          基因庫
+        </button>
+        <button onClick={() => setViewTab('ranking')}
+          className={`px-3 py-1.5 text-sm rounded-lg cursor-pointer ${viewTab === 'ranking' ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}>
+          跨任務排名
+        </button>
+      </div>
+
+      {viewTab === 'ranking' && <ChampionRanking />}
+
+      {viewTab === 'library' && <>
+      <div className="flex items-center gap-2 mb-4">
         <button onClick={() => setFavoritesOnly(false)}
           className={`px-3 py-1.5 text-sm rounded-lg cursor-pointer ${!favoritesOnly ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}>
           全部 ({totalChampions})
@@ -351,6 +368,7 @@ export function GenePoolPanel() {
           </div>
         )}
       </div>
+      </>}
 
       {detailChampion && (
         <ChampionDetailDrawer

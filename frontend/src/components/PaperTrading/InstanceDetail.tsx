@@ -5,17 +5,68 @@ interface Props {
   instanceId: string
 }
 
+interface PaperAccount {
+  instance_id: string
+  name: string
+  status: string
+  symbols: string | string[]
+  total_equity: number
+  total_return: number
+  realized_pnl: number
+  trade_count: number
+  timeframe: string
+  initial_capital: number
+  started_at?: number
+  stopped_at?: number
+  params_json?: string
+}
+
+interface Position {
+  symbol: string
+  side: string
+  quantity?: number
+  current_price?: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number
+}
+
+interface Trade {
+  trade_id: string
+  executed_time: number
+  symbol: string
+  side: string
+  price: number
+  quantity: number
+  realized_pnl: number
+  time: number
+}
+
+interface ChartData {
+  equity_curve?: number[]
+  equity_dates?: number[]
+  prices?: Record<string, { dates: string[]; values: number[] }>
+  trades?: Trade[]
+}
+
+const statusColors: Record<string, string> = {
+  INITIALIZING: 'bg-yellow-500',
+  RUNNING: 'bg-green-500',
+  PAUSED: 'bg-yellow-400',
+  STOPPED: 'bg-gray-400',
+  FAILED: 'bg-red-500',
+}
+
 export function InstanceDetail({ instanceId }: Props) {
-  const [instance, setInstance] = useState<any>(null)
-  const [positions, setPositions] = useState<any[]>([])
-  const [trades, setTrades] = useState<any[]>([])
-  const [chartData, setChartData] = useState<any>(null)
+  const [instance, setInstance] = useState<PaperAccount | null>(null)
+  const [positions, setPositions] = useState<Position[]>([])
+  const [trades, setTrades] = useState<Trade[]>([])
+  const [chartData, setChartData] = useState<ChartData | null>(null)
   const [tab, setTab] = useState<'monitor' | 'trades' | 'params'>('monitor')
   const chartRef = useRef<HTMLDivElement>(null)
   const priceRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const [symbolsList, setSymbolsList] = useState<string[]>([])
-  const priceChartDataRef = useRef<{ prices: Record<string, { dates: string[]; values: number[] }>; trades: any[] }>({ prices: {}, trades: [] })
+  const priceChartDataRef = useRef<{ prices: Record<string, { dates: string[]; values: number[] }>; trades: Trade[] }>({ prices: {}, trades: [] })
 
   const refreshPositionsAndTrades = useCallback(() => {
     fetch(`/paper-trading/${instanceId}/positions`).then((r) => r.json()).then(setPositions)
@@ -39,9 +90,9 @@ export function InstanceDetail({ instanceId }: Props) {
 
   // WebSocket for real-time updates from ticker
   usePaperTradingWS(instanceId, {
-    onInit: (inst) => setInstance(inst),
+    onInit: (inst) => setInstance(inst as unknown as PaperAccount),
     onTick: (payload) => {
-      if (payload.instance) setInstance(payload.instance)
+      if (payload.instance) setInstance(payload.instance as unknown as PaperAccount)
       if (payload.events && payload.events.length > 0) {
         // A trade happened — refresh positions, trades, and chart
         refreshPositionsAndTrades()
@@ -57,16 +108,17 @@ export function InstanceDetail({ instanceId }: Props) {
   // equity curve chart
   useEffect(() => {
     if (!chartRef.current || !instance) return
-    const Plotly = (window as any).Plotly
+    const Plotly = (window as unknown as Record<string, unknown>).Plotly as
+      { newPlot: (el: HTMLElement, data: Record<string, unknown>[], layout: Record<string, unknown>, config: Record<string, unknown>) => void } | undefined
     if (!Plotly) return
-    const curve = (chartData?.equity_curve?.length ?? 0) > 0
-      ? chartData.equity_curve
-      : [instance.initial_capital, (instance.total_equity || instance.initial_capital)]
-    const ts = (chartData?.equity_dates?.length ?? 0) > 0 ? chartData.equity_dates : []
+    const curveArr = chartData?.equity_curve
+    const curve = curveArr?.length ? curveArr : [instance.initial_capital, (instance.total_equity || instance.initial_capital)]
+    const tsArr = chartData?.equity_dates
+    const ts: number[] = tsArr?.length ? tsArr : []
     const fmtDate = (d: Date) =>
       `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
     const xDates = ts.length > 0
-      ? ts.map((t: number) => fmtDate(new Date(t * 1000)))
+      ? ts.map((t) => fmtDate(new Date(t * 1000)))
       : [fmtDate(new Date((instance.started_at || Date.now() / 1000) * 1000)), fmtDate(new Date())]
     Plotly.newPlot(chartRef.current, [{
       x: xDates, y: curve, type: 'scatter', mode: 'lines',
@@ -81,7 +133,8 @@ export function InstanceDetail({ instanceId }: Props) {
   // per-symbol price charts
   useEffect(() => {
     if (symbolsList.length === 0) return
-    const Plotly = (window as any).Plotly
+    const Plotly = (window as unknown as Record<string, unknown>).Plotly as
+      { newPlot: (el: HTMLElement, data: Record<string, unknown>[], layout: Record<string, unknown>, config: Record<string, unknown>) => void } | undefined
     if (!Plotly) return
     const { prices, trades } = priceChartDataRef.current
     const allTrades = trades || []
@@ -92,34 +145,34 @@ export function InstanceDetail({ instanceId }: Props) {
       const el = priceRefs.current[sym]
       if (!el) return
 
-      const symTrades = allTrades.filter((t: any) => t.symbol === sym)
-      const traces: any[] = [{
+      const symTrades = allTrades.filter((t: Trade) => t.symbol === sym)
+      const traces: Record<string, unknown>[] = [{
         x: px.dates, y: px.values,
         type: 'scatter', mode: 'lines',
         name: sym, line: { color: '#2563eb', width: 1.5 },
       }]
 
-      const buys = symTrades.filter((t: any) => t.side === 'buy')
-      const sells = symTrades.filter((t: any) => t.side === 'sell')
+      const buys = symTrades.filter((t: Trade) => t.side === 'buy')
+      const sells = symTrades.filter((t: Trade) => t.side === 'sell')
 
       if (buys.length > 0) {
-        const buyTimes = buys.map((t: any) => {
+        const buyTimes = buys.map((t: Trade) => {
           const dt = new Date(t.time * 1000)
           return `${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
         })
         traces.push({
-          x: buyTimes, y: buys.map((t: any) => t.price),
+          x: buyTimes, y: buys.map((t: Trade) => t.price),
           type: 'scatter', mode: 'markers', name: '買進',
           marker: { symbol: 'triangle-up', size: 10, color: '#16a34a', line: { color: '#14532d', width: 1 } },
         })
       }
       if (sells.length > 0) {
-        const sellTimes = sells.map((t: any) => {
+        const sellTimes = sells.map((t: Trade) => {
           const dt = new Date(t.time * 1000)
           return `${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
         })
         traces.push({
-          x: sellTimes, y: sells.map((t: any) => t.price),
+          x: sellTimes, y: sells.map((t) => t.price),
           type: 'scatter', mode: 'markers', name: '賣出',
           marker: { symbol: 'triangle-down', size: 10, color: '#dc2626', line: { color: '#7f1d1d', width: 1 } },
         })
@@ -130,7 +183,7 @@ export function InstanceDetail({ instanceId }: Props) {
         margin: { t: 35, r: 20, b: 40, l: 60 }, height: 220,
         xaxis: { title: '時間' }, yaxis: { title: '價格' },
         paper_bgcolor: 'white', plot_bgcolor: 'white',
-        legend: { x: 1, xanchor: 'right', y: 1, font: { size: 9 } },
+        legend: { x: 1, xanchor: 'right', y: 0, yanchor: 'bottom', font: { size: 9 } },
       }, { responsive: true, displayModeBar: false })
     })
   }, [symbolsList, chartData])
@@ -176,7 +229,7 @@ export function InstanceDetail({ instanceId }: Props) {
               const r = await fetch('/live-trading/from-paper/' + instance.instance_id, { method: 'POST' })
               if (!r.ok) { const e = await r.json(); alert('轉入失敗：' + (e.detail || r.statusText)); return }
               window.location.reload()
-            } catch (e: any) { alert('轉入失敗：' + e.message) }
+            } catch (e: unknown) { alert('轉入失敗：' + (e instanceof Error ? e.message : String(e))) }
           }}
             className="px-3 py-1.5 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer">轉入實盤</button>
           <button onClick={instance.status === 'STOPPED' ? handleDelete : handleStop}
@@ -185,7 +238,15 @@ export function InstanceDetail({ instanceId }: Props) {
           </button>
         </div>
       </div>
-      <div className="text-sm text-gray-400 mb-4">狀態：{instance.status}</div>
+      <div className="flex items-center gap-2 mb-4">
+        <span className={`w-2.5 h-2.5 rounded-full ${statusColors[instance.status] || 'bg-gray-400'}`} />
+        <span className="text-sm text-gray-400">
+          {instance.status === 'INITIALIZING' ? '初始化中' :
+           instance.status === 'RUNNING' ? '運行中' :
+           instance.status === 'PAUSED' ? '已暫停' :
+           instance.status === 'STOPPED' ? '已停止' : '失敗'}
+        </span>
+      </div>
 
       <div className="grid grid-cols-5 gap-3 mb-4">
         {[
@@ -193,7 +254,20 @@ export function InstanceDetail({ instanceId }: Props) {
           ['總報酬', `${instance.total_return >= 0 ? '+' : ''}${instance.total_return?.toFixed(2)}%`],
           ['已實現損益', `${instance.realized_pnl?.toFixed(2)} USDT`],
           ['交易次數', instance.trade_count],
-          ['精度', instance.timeframe || '-'],
+          ['運行時間', (() => {
+            if (!instance.started_at) return '-'
+            const end = instance.stopped_at ?? Date.now() / 1000
+            const sec = Math.max(0, Math.floor(end - instance.started_at))
+            if (sec < 60) return `${sec}s`
+            const min = Math.floor(sec / 60)
+            if (min < 60) return `${min}m`
+            const hr = Math.floor(min / 60)
+            const remMin = min % 60
+            if (hr < 24) return `${hr}h ${remMin}m`
+            const day = Math.floor(hr / 24)
+            const remHr = hr % 24
+            return `${day}d ${remHr}h`
+          })()],
         ].map(([k, v]) => (
           <div key={k} className="p-3 border rounded-lg bg-white">
             <div className="text-xs text-gray-400">{k}</div>
@@ -214,7 +288,7 @@ export function InstanceDetail({ instanceId }: Props) {
       {tab === 'monitor' && (
         <div>
           <div className="space-y-2 mb-4">
-            {positions.map((p: any) => {
+            {positions.map((p: Position) => {
               const mv = (p.current_price || 0) * (p.quantity || 0)
               return (
               <div key={p.symbol} className="flex items-center justify-between p-3 border rounded-lg bg-white">
@@ -268,7 +342,7 @@ export function InstanceDetail({ instanceId }: Props) {
               </tr>
             </thead>
             <tbody>
-              {trades.map((t: any) => (
+              {trades.map((t: Trade) => (
                 <tr key={t.trade_id} className="border-t">
                   <td className="p-2 text-xs">{new Date(t.executed_time * 1000).toLocaleString()}</td>
                   <td className="p-2 text-xs">{t.symbol}</td>

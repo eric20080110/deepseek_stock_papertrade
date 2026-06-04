@@ -351,6 +351,136 @@ def _run_symbol_wrapper(args: tuple) -> Optional[SymbolResult]:
     return run_symbol_backtest(symbol, df, params, strategy_id, initial_capital, stop_loss_pct, take_profit_pct)
 
 
+def run_ensemble_backtest(
+    strategies: list[tuple[str, dict]],  # [(strategy_id, params), ...]
+    symbols: list[str],
+    data_map: dict[str, pd.DataFrame],
+    initial_capital: float = 10_000.0,
+    ensemble_threshold: float = 0.2,
+    stop_loss_pct: float = 0.0,
+    take_profit_pct: float = 0.0,
+) -> InstanceResult:
+    """Run signal-averaging ensemble backtest across multiple strategies."""
+    start = time.time()
+
+    for sym, df in data_map.items():
+        DATA_CACHE.store(sym, df)
+
+    symbol_results: dict[str, SymbolResult] = {}
+
+    for sym in symbols:
+        df = data_map.get(sym)
+        if df is None or len(df) < SETTINGS.min_bars:
+            continue
+
+        close = df["close"].values
+        high = df["high"].values
+        low = df["low"].values
+        volume = df["volume"].values
+        n = len(df)
+
+        if n > 1:
+            idx_vals = df.index.values
+            if hasattr(idx_vals, "dtype") and "datetime64" in str(idx_vals.dtype):
+                timestamps = (idx_vals.astype(np.int64) // 10**9).astype(np.int64)
+            else:
+                timestamps = idx_vals.astype(np.int64)
+            avg_bar_sec = float(timestamps[-1] - timestamps[0]) / (n - 1)
+            bars_per_year = int(365.25 * 86400 / avg_bar_sec) if avg_bar_sec > 0 else 365
+        else:
+            timestamps = np.zeros(1, dtype=np.int64)
+            bars_per_year = 365
+
+        all_sigs = []
+        for strategy_id, params in strategies:
+            mod = get_strategy_module(strategy_id)
+            if mod is None:
+                continue
+            signals = mod.generate_signals(df, params)
+            all_sigs.append(signals.values.astype(np.float64))
+
+        if not all_sigs:
+            continue
+
+        # Average signals across strategies
+        avg_sig = np.mean(all_sigs, axis=0)
+        # Threshold to int8
+        sig = np.zeros(n, dtype=np.int8)
+        sig[avg_sig > ensemble_threshold] = 1
+        sig[avg_sig < -ensemble_threshold] = -1
+
+        entry_qty = (initial_capital * 0.99) / np.maximum(close, 1.0)
+        vol_ratio = np.where(volume > 0, entry_qty / volume, 0.0)
+        slip_arr = np.minimum(vol_ratio * 0.001, SETTINGS.max_slippage_rate)
+        slip_arr[vol_ratio < SETTINGS.slippage_volume_ratio] = 0.0
+
+        sig_diff = np.where(sig[:-1] != sig[1:])[0] + 2
+        process = sig_diff[sig_diff < n]
+        process = np.unique(np.concatenate([process, [n]])).astype(np.int64) if len(process) else np.array([n], dtype=np.int64)
+
+        (equity_curve, n_trades, entry_times, exit_times,
+         entry_bars, exit_bars, entry_prices, exit_prices,
+         quantities, pnls, pnl_pcts, directions) = _run_backtest_core(
+            sig, close, high, low,
+            slip_arr.astype(np.float64), timestamps,
+            float(initial_capital), float(SETTINGS.taker_fee_rate),
+            float(stop_loss_pct), float(take_profit_pct), process,
+        )
+
+        trades = [
+            TradeRecord(symbol=sym, entry_time=int(entry_times[k]), exit_time=int(exit_times[k]),
+                        entry_bar=int(entry_bars[k]), exit_bar=int(exit_bars[k]),
+                        entry_price=float(entry_prices[k]), exit_price=float(exit_prices[k]),
+                        quantity=float(quantities[k]), pnl=round(float(pnls[k]), 2),
+                        pnl_pct=round(float(pnl_pcts[k]), 4), direction=int(directions[k]))
+            for k in range(n_trades)
+        ]
+        equity_list = [float(v) for v in equity_curve]
+        metrics_dict = compute_metrics(equity_list, trades, n, bars_per_year)
+        avg_dv = float(np.mean(volume)) if n > 0 else 0.0
+
+        symbol_results[sym] = SymbolResult(
+            symbol=sym, total_return=metrics_dict["total_return"],
+            annualized_return=metrics_dict["annualized_return"],
+            sharpe_ratio=metrics_dict["sharpe_ratio"],
+            sortino_ratio=metrics_dict["sortino_ratio"],
+            calmar_ratio=metrics_dict["calmar_ratio"],
+            max_drawdown=metrics_dict["max_drawdown"],
+            win_rate=metrics_dict["win_rate"],
+            profit_factor=metrics_dict["profit_factor"],
+            trade_count=metrics_dict["trade_count"],
+            equity_curve=equity_list,
+            equity_timestamps=[int(t) for t in timestamps.tolist()],
+            trades=trades, avg_daily_volume=avg_dv,
+        )
+
+    total_volume = sum(r.avg_daily_volume for r in symbol_results.values())
+    weights = {}
+    if total_volume > 0:
+        for sym, r in symbol_results.items():
+            weights[sym] = r.avg_daily_volume / total_volume
+    else:
+        n = len(symbol_results)
+        for sym in symbol_results:
+            weights[sym] = 1.0 / n if n > 0 else 0.0
+
+    metric_keys = ["total_return", "annualized_return", "sharpe_ratio", "max_drawdown",
+                   "win_rate", "profit_factor", "trade_count"]
+    weighted_metrics = {}
+    for key in metric_keys:
+        val = sum(getattr(r, key) * weights[sym] for sym, r in symbol_results.items())
+        weighted_metrics[key] = round(val, 4)
+
+    return InstanceResult(
+        strategy_id="ensemble",
+        params={"n_strategies": len(strategies), "threshold": ensemble_threshold},
+        symbol_results=symbol_results,
+        weighted_metrics=weighted_metrics,
+        weights=weights,
+        backtest_duration_sec=round(time.time() - start, 4),
+    )
+
+
 def run_backtest(
     strategy_id: str,
     params: dict,

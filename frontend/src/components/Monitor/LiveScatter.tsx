@@ -12,11 +12,12 @@ export function LiveScatter({ latest }: Props) {
 
   useEffect(() => {
     if (!chartRef.current || !latest || latest.pareto_front.length === 0) return
-    const Plotly = (window as any).Plotly
+    const Plotly = (window as unknown as Record<string, unknown>).Plotly as
+      { newPlot: (el: HTMLElement, data: Record<string, unknown>[], layout: Record<string, unknown>, config: Record<string, unknown>) => void } | undefined
     if (!Plotly) return
 
     const front = latest.pareto_front
-    const data = [{
+    const data: Record<string, unknown>[] = [{
       x: front.map((f) => f.cagr * 100),
       y: front.map((f) => f.dd),
       customdata: front.map((f) => f.id),
@@ -33,7 +34,7 @@ export function LiveScatter({ latest }: Props) {
       hoverinfo: 'text',
     }]
 
-    const layout = {
+    const layout: Record<string, unknown> = {
       margin: { t: 10, r: 20, b: 40, l: 50 },
       height: 350,
       xaxis: { title: 'CAGR %' },
@@ -43,10 +44,10 @@ export function LiveScatter({ latest }: Props) {
 
     const el = chartRef.current
     Plotly.newPlot(el, data, layout, { responsive: true, displayModeBar: false })
-    el.on('plotly_click', (eventData: any) => {
-      const pt = eventData?.points?.[0]
+    ;(el as unknown as { on: (e: string, h: (d: Record<string, unknown>) => void) => void }).on('plotly_click', (eventData: Record<string, unknown>) => {
+      const pt = (eventData?.points as Record<string, unknown>[] | undefined)?.[0]
       if (!pt) return
-      const id = pt.customdata
+      const id = pt.customdata as string | undefined
       if (id) setSelectedIndividualId(id)
     })
   }, [latest])

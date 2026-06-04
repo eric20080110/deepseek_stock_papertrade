@@ -21,8 +21,8 @@ export function StrategyCard({ strategy, onEdit, onRefresh, onUseStrategy, onCre
     try {
       await api.deleteStrategy(s.config_id)
       onRefresh()
-    } catch (e: any) {
-      toast.error(e.message)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -30,8 +30,8 @@ export function StrategyCard({ strategy, onEdit, onRefresh, onUseStrategy, onCre
     try {
       await api.duplicateStrategy(s.config_id)
       onRefresh()
-    } catch (e: any) {
-      toast.error(e.message)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e))
     }
   }
 

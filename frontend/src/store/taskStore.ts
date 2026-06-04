@@ -19,7 +19,7 @@ interface TaskState {
   apiStatus: 'unknown' | 'ok' | 'error'
   selectedIndividualId: string | null
   selectedStrategy: string | null
-  seedParams: Record<string, any> | null
+  seedParams: Record<string, unknown> | null
   individualProgress: IndividualProgress | null
 
   setTasks: (tasks: EvolutionTask[]) => void
@@ -33,7 +33,7 @@ interface TaskState {
   setWsStatus: (status: TaskState['wsStatus']) => void
   setSelectedIndividualId: (id: string | null) => void
   setSelectedStrategy: (id: string | null) => void
-  setSeedParams: (params: Record<string, any> | null) => void
+  setSeedParams: (params: Record<string, unknown> | null) => void
   clearGenerationHistory: () => void
   setIndividualProgress: (progress: IndividualProgress | null) => void
   triggerDbStatusRefresh: () => void
@@ -46,7 +46,7 @@ export const useTaskStore = create<TaskState>((set) => ({
   dbStatusVersion: 0,
   retryConfig: null,
   selectedAnalysisTaskId: null,
-  currentView: 'queue',
+  currentView: 'dashboard',
   generationHistory: [],
   wsStatus: 'idle',
   apiStatus: 'unknown',

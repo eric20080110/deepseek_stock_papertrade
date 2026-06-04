@@ -24,7 +24,7 @@ export interface EvolutionTask {
   total_generations: number
   progress_pct: number
   error_message: string | null
-  result_summary: Record<string, any> | null
+  result_summary: Record<string, unknown> | null
 }
 
 export interface GenerationResult {
@@ -52,6 +52,12 @@ export interface FrontIndividual {
   dd: number
   sharpe: number
   oos: number
+  sortino?: number
+  calmar?: number
+  profit_factor?: number
+  win_rate?: number
+  var_95?: number
+  cvar_95?: number
 }
 
-export type ViewType = 'strategy' | 'new-task' | 'queue' | 'monitor' | 'analysis' | 'gene-pool' | 'paper-trading' | 'live-trading'
+export type ViewType = 'dashboard' | 'strategy' | 'new-task' | 'queue' | 'monitor' | 'analysis' | 'gene-pool' | 'paper-trading' | 'live-trading'

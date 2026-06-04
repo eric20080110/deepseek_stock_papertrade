@@ -24,16 +24,16 @@ export function SymbolInput({ symbols, onChange }: Props) {
   const [usLoading, setUsLoading] = useState(false)
   const [highlightIdx, setHighlightIdx] = useState(-1)
   const ref = useRef<HTMLDivElement>(null)
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     if (cryptoCache) { setLoading(false); return }
     fetch('https://api.binance.com/api/v3/exchangeInfo')
       .then((r) => r.json())
-      .then((data) => {
-        cryptoCache = (data.symbols as any[])
-          .filter((s: any) => s.status === 'TRADING' && s.quoteAsset === 'USDT')
-          .map((s: any) => ({ label: `${s.baseAsset}/${s.quoteAsset}`, value: `${s.baseAsset}${s.quoteAsset}`, market: 'crypto' as const }))
+      .then((data: { symbols: Array<{ status: string; quoteAsset: string; baseAsset: string }> }) => {
+        cryptoCache = data.symbols
+          .filter((s) => s.status === 'TRADING' && s.quoteAsset === 'USDT')
+          .map((s) => ({ label: `${s.baseAsset}/${s.quoteAsset}`, value: `${s.baseAsset}${s.quoteAsset}`, market: 'crypto' as const }))
           .sort((a, b) => a.label.localeCompare(b.label))
         setLoading(false)
       })
@@ -60,10 +60,11 @@ export function SymbolInput({ symbols, onChange }: Props) {
         const res = await fetch(`${API_BASE}/symbols/search?q=${encodeURIComponent(q)}`)
         if (res.ok) {
           const data = await res.json()
-          us = (data.results || []).map((r: any) => ({
+          const results: Array<{ symbol: string; name?: string; type: Suggestion['market'] }> = data.results || []
+          us = results.map((r) => ({
             label: `${r.symbol}${r.name && r.name !== r.symbol ? `  ${r.name}` : ''}`,
             value: r.symbol,
-            market: r.type as Suggestion['market'],
+            market: r.type,
           }))
         }
       } catch { /* ignore */ }

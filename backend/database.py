@@ -355,6 +355,8 @@ CREATE TABLE IF NOT EXISTS individuals (
 );
 CREATE INDEX IF NOT EXISTS idx_individuals_task_gen ON individuals(task_id, generation);
 CREATE INDEX IF NOT EXISTS idx_individuals_rank ON individuals(task_id, pareto_rank);
+CREATE INDEX IF NOT EXISTS idx_individuals_pareto ON individuals(pareto_rank);
+CREATE INDEX IF NOT EXISTS idx_individuals_rank_cagr ON individuals(pareto_rank, cagr);
 CREATE TABLE IF NOT EXISTS pareto_fronts (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id         TEXT NOT NULL,

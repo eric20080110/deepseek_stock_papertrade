@@ -6,9 +6,17 @@ import { ParetoScatter3D } from './ParetoScatter3D'
 import { EvolutionTrend } from './EvolutionTrend'
 import { EquityCurve } from './EquityCurve'
 import { ParamHeatmap } from './ParamHeatmap'
+import { ComparePanel } from './ComparePanel'
+import { EnsemblePanel } from './EnsemblePanel'
 import { IndividualDrawer } from './IndividualDrawer'
 
-type Tab = 'scatter' | 'trend' | 'equity' | 'heatmap'
+type Tab = 'scatter' | 'trend' | 'equity' | 'heatmap' | 'compare' | 'ensemble'
+
+interface IndividualSummary {
+  cagr: number
+  params_json: string
+  strategy_id: string
+}
 
 export function AnalysisPanel() {
   const taskId = useTaskStore((s) => s.selectedAnalysisTaskId)
@@ -35,7 +43,7 @@ export function AnalysisPanel() {
         toast.error('此任務沒有帕雷托前緣個體，無法繼續演化')
         return
       }
-      individuals.sort((a: any, b: any) => (b.cagr || 0) - (a.cagr || 0))
+      individuals.sort((a: IndividualSummary, b: IndividualSummary) => (b.cagr || 0) - (a.cagr || 0))
       const top10 = individuals.slice(0, Math.max(1, Math.ceil(individuals.length * 0.1)))
       const champion = top10[0]
       const params = JSON.parse(champion.params_json || '{}')
@@ -81,6 +89,18 @@ export function AnalysisPanel() {
               </option>
             ))}
           </select>
+          {taskId && (
+            <>
+              <a href={`/tasks/${taskId}/export`} target="_blank" rel="noopener noreferrer"
+                className="px-2.5 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-xs hover:bg-gray-50">
+                匯出 CSV
+              </a>
+              <a href={`/tasks/${taskId}/export/json`} target="_blank" rel="noopener noreferrer"
+                className="px-2.5 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-xs hover:bg-gray-50">
+                匯出 JSON
+              </a>
+            </>
+          )}
           <button onClick={handleQuickEvolve} disabled={evolving}
             className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50 cursor-pointer">
             {evolving ? '演化中...' : '前 10% 快速演化'}
@@ -90,12 +110,12 @@ export function AnalysisPanel() {
 
       {taskId && (
         <div className="flex gap-1 mb-4 border-b">
-          {(['scatter', 'trend', 'equity', 'heatmap'] as const).map((t) => (
+          {(['scatter', 'trend', 'equity', 'heatmap', 'compare', 'ensemble'] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-sm border-b-2 cursor-pointer ${
                 tab === t ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500'
               }`}>
-              {t === 'scatter' ? '帕雷托散點' : t === 'trend' ? '演化歷程' : t === 'equity' ? '資金曲線' : '參數熱圖'}
+              {t === 'scatter' ? '帕雷托散點' : t === 'trend' ? '演化歷程' : t === 'equity' ? '資金曲線' : t === 'heatmap' ? '參數熱圖' : t === 'compare' ? '策略對比' : '策略集成'}
             </button>
           ))}
         </div>
@@ -107,6 +127,8 @@ export function AnalysisPanel() {
       {tab === 'trend' && taskId && <EvolutionTrend taskId={taskId} />}
       {tab === 'equity' && taskId && <EquityCurve taskId={taskId} />}
       {tab === 'heatmap' && taskId && <ParamHeatmap taskId={taskId} />}
+      {tab === 'compare' && taskId && <ComparePanel taskId={taskId} />}
+      {tab === 'ensemble' && taskId && <EnsemblePanel taskId={taskId} />}
 
       <IndividualDrawer />
     </div>

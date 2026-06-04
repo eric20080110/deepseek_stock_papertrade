@@ -13,7 +13,7 @@ export function ContinuousFields({ min, max, defaultVal, scale, onChange }: Prop
       <label>最大值 <input type="number" step="any" value={max} onChange={(e) => onChange({ min, max: +e.target.value, default: defaultVal, scale })} className="w-16 px-1 py-0.5 border rounded text-xs" /></label>
       <label>預設值 <input type="number" step="any" value={defaultVal} onChange={(e) => onChange({ min, max, default: +e.target.value, scale })} className="w-16 px-1 py-0.5 border rounded text-xs" /></label>
       <label>尺度
-        <select value={scale} onChange={(e) => onChange({ min, max, default: defaultVal, scale: e.target.value as any })} className="ml-1 px-1 py-0.5 border rounded text-xs">
+        <select value={scale} onChange={(e) => onChange({ min, max, default: defaultVal, scale: e.target.value as 'linear' | 'logarithmic' })} className="ml-1 px-1 py-0.5 border rounded text-xs">
           <option value="linear">線性</option>
           <option value="logarithmic">對數</option>
         </select>

@@ -2,13 +2,13 @@ import { useEffect, useRef } from 'react'
 
 interface TickPayload {
   type: 'INIT' | 'TICK' | 'ping'
-  instance?: Record<string, any>
+  instance?: Record<string, unknown>
   total_equity?: number
-  events?: any[]
+  events?: unknown[]
 }
 
 interface Options {
-  onInit: (instance: Record<string, any>) => void
+  onInit: (instance: Record<string, unknown>) => void
   onTick: (payload: TickPayload) => void
 }
 
@@ -34,7 +34,7 @@ export function usePaperTradingWS(instanceId: string | null, { onInit, onTick }:
           } else if (msg.type === 'TICK') {
             onTick(msg)
           }
-        } catch {}
+        } catch { /* ignore parse errors */ }
       }
 
       ws.onclose = () => {

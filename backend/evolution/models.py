@@ -24,7 +24,7 @@ class TaskConfig(BaseModel):
     parent_pool_ratio: float = 0.5
     early_stop_generations: Optional[int] = None
     seed_params: Optional[dict[str, Any]] = None
-    walk_forward_windows: int = 1
+    walk_forward_windows: int = 3
 
 
 class EvolutionTask(BaseModel):

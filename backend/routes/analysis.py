@@ -1,5 +1,6 @@
 import json, csv, io, numpy as np, pandas as pd
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from fastapi.responses import Response
 from typing import Optional
 
@@ -133,6 +134,29 @@ def get_individual(task_id: str, sid: str):
     return d
 
 
+@router.get("/individuals/{sid}/monte-carlo")
+def individual_monte_carlo(
+    task_id: str,
+    sid: str,
+    n_simulations: int = Query(1000),
+):
+    from backtest.metrics import run_monte_carlo
+    conn = get_db()
+    row = conn.execute(
+        "SELECT equity_curve_json FROM individuals"
+        " WHERE task_id = ? AND strategy_id = ? ORDER BY generation DESC LIMIT 1",
+        (task_id, sid),
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, "Individual not found")
+    raw = json.loads(row["equity_curve_json"])
+    curve = raw.get("v", raw) if isinstance(raw, dict) else raw
+    if not curve:
+        raise HTTPException(400, "No equity curve data")
+    return run_monte_carlo(curve, n_simulations=n_simulations)
+
+
 @router.get("/individuals/{sid}/equity-curve")
 def individual_equity_curve(
     task_id: str,
@@ -159,8 +183,7 @@ def individual_equity_curve(
 
     result: dict = {}
 
-    # Estimate bar count to decide whether re-run and price overlays are feasible
-    _RERUN_BAR_LIMIT = 10000
+    # Estimate bar count to decide whether price overlays are feasible
     _OVERLAY_BAR_LIMIT = 20000
     est_bars = 0
     if config:
@@ -174,7 +197,7 @@ def individual_equity_curve(
         except Exception:
             est_bars = 0
 
-    should_rerun = not is_range_query and config and params and est_bars <= _RERUN_BAR_LIMIT
+    should_rerun = not is_range_query and config and params
     skip_overlay = is_range_query or est_bars > _OVERLAY_BAR_LIMIT
 
     if should_rerun:
@@ -186,33 +209,61 @@ def individual_equity_curve(
         conn2.close()
         strategy_id = (cfg_row["template_id"] or cfg_row["config_id"]) if cfg_row else config.strategy_config_id
 
-        full_results = []
-        for sym in config.symbols:
-            df = DATA_CACHE.ensure(sym, start_date=config.start_date, end_date=config.end_date, timeframe=config.timeframe)
-            if df is None or df.empty:
-                continue
-            sr = run_symbol_backtest(symbol=sym, data=df, params=params, strategy_id=strategy_id, initial_capital=10000.0)
-            if sr:
-                full_results.append(sr)
+        from strategies.base import get_strategy_module
+        mod = get_strategy_module(strategy_id)
+        is_rotation = mod is not None and getattr(mod, "IS_ROTATION", False)
 
-        if full_results:
-            min_len = min(len(sr.equity_curve) for sr in full_results)
-            raw_curve = [round(float(np.mean([sr.equity_curve[i] for sr in full_results])), 2) for i in range(min_len)]
-            result["equity_curve"] = _downsample(raw_curve, max_points)
-            ts_full = full_results[0].equity_timestamps or []
-            n_ds = len(result["equity_curve"])
-            ds_idx = [int(i * min_len / n_ds) for i in range(n_ds)] if ts_full else []
-            result["dates"] = [datetime.utcfromtimestamp(ts_full[i]).strftime("%Y-%m-%d %H:%M") for i in ds_idx] if ts_full else []
-            result["symbol_curves"] = {sr.symbol: _downsample(sr.equity_curve, max_points) for sr in full_results}
-            result["symbol_trades"] = {
-                sr.symbol: [
-                    {"entry_bar": t.entry_bar, "exit_bar": t.exit_bar,
-                     "entry_price": t.entry_price, "exit_price": t.exit_price,
-                     "direction": t.direction, "pnl": t.pnl}
-                    for t in sr.trades
-                ]
-                for sr in full_results
-            }
+        if is_rotation:
+            rot_syms = list(getattr(mod, "ROTATION_SYMBOLS", []))
+            safe_sym = getattr(mod, "SAFE_SYMBOL", "BIL")
+            spy_sym = getattr(mod, "SPY_SYMBOL", "SPY")
+            all_syms = list(dict.fromkeys(rot_syms + [safe_sym, spy_sym]))
+            data_map = {}
+            for sym in all_syms:
+                df = DATA_CACHE.ensure(sym, start_date=config.start_date, end_date=config.end_date, timeframe=config.timeframe)
+                if df is not None and not df.empty:
+                    data_map[sym] = df
+            if data_map:
+                from backtest.rotation_engine import run_rotation_backtest
+                sr = run_rotation_backtest(data_map, params, initial_capital=10000.0,
+                                           rotation_symbols=rot_syms, safe_symbol=safe_sym,
+                                           spy_symbol=spy_sym, strategy_module=mod)
+                if sr and sr.equity_curve:
+                    result["equity_curve"] = _downsample(sr.equity_curve, max_points)
+                    ts = sr.equity_timestamps or []
+                    n_ds = len(result["equity_curve"])
+                    n_raw = len(sr.equity_curve)
+                    ds_idx = [int(i * n_raw / n_ds) for i in range(n_ds)] if ts else []
+                    result["dates"] = [datetime.utcfromtimestamp(ts[i]).strftime("%Y-%m-%d %H:%M") for i in ds_idx] if ts else []
+        else:
+            symbols = list(config.symbols)
+            full_results = []
+            for sym in symbols:
+                df = DATA_CACHE.ensure(sym, start_date=config.start_date, end_date=config.end_date, timeframe=config.timeframe)
+                if df is None or df.empty:
+                    continue
+                sr = run_symbol_backtest(symbol=sym, data=df, params=params, strategy_id=strategy_id, initial_capital=10000.0)
+                if sr:
+                    full_results.append(sr)
+
+            if full_results:
+                min_len = min(len(sr.equity_curve) for sr in full_results)
+                raw_curve = [round(float(np.mean([sr.equity_curve[i] for sr in full_results])), 2) for i in range(min_len)]
+                result["equity_curve"] = _downsample(raw_curve, max_points)
+                ts_full = full_results[0].equity_timestamps or []
+                n_ds = len(result["equity_curve"])
+                ds_idx = [int(i * min_len / n_ds) for i in range(n_ds)] if ts_full else []
+                result["dates"] = [datetime.utcfromtimestamp(ts_full[i]).strftime("%Y-%m-%d %H:%M") for i in ds_idx] if ts_full else []
+                result["symbol_curves"] = {sr.symbol: _downsample(sr.equity_curve, max_points) for sr in full_results}
+                result["symbol_trades"] = {
+                    sr.symbol: [
+                        {"entry_bar": t.entry_bar, "exit_bar": t.exit_bar,
+                         "entry_price": t.entry_price, "exit_price": t.exit_price,
+                         "direction": t.direction, "pnl": t.pnl}
+                        for t in sr.trades
+                    ]
+                    for sr in full_results
+                }
 
     # Fallback: use stored IS equity curve
     if "equity_curve" not in result:
@@ -275,7 +326,58 @@ def individual_equity_curve(
         if dca_by_sym:
             min_len = min(len(c) for c in dca_by_sym.values())
             result["dca_combined"] = [round(float(np.mean([dca_by_sym[s][i] for s in symbols])), 2) for i in range(min_len)]
+
+    if config:
+        result["n_windows"] = config.walk_forward_windows
     return result
+
+
+@router.get("/individuals/{sid}/rolling-metrics")
+def individual_rolling_metrics(
+    task_id: str,
+    sid: str,
+    window: int = Query(60, description="Rolling window in bars"),
+):
+    from backtest.metrics import compute_sharpe
+    conn = get_db()
+    row = conn.execute(
+        "SELECT equity_curve_json FROM individuals"
+        " WHERE task_id = ? AND strategy_id = ? ORDER BY generation DESC LIMIT 1",
+        (task_id, sid),
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, "Individual not found")
+    
+    raw = json.loads(row["equity_curve_json"])
+    curve = raw.get("v", raw) if isinstance(raw, dict) else raw
+    if not curve or len(curve) < window * 2:
+        return {"rolling_sharpe": [], "rolling_volatility": [], "rolling_win_rate": [], "labels": []}
+    
+    import numpy as np
+    series = pd.Series(curve)
+    returns = series.pct_change().dropna()
+    
+    rolling_sharpe = []
+    rolling_vol = []
+    rolling_win_rate = []
+    labels = []
+    
+    for i in range(window, len(returns)):
+        chunk = returns.iloc[i-window:i]
+        r_mean = chunk.mean()
+        r_std = chunk.std()
+        rolling_sharpe.append(round((r_mean / r_std * np.sqrt(365)) if r_std > 0 else 0, 4))
+        rolling_vol.append(round(float(r_std * np.sqrt(365) * 100), 4))
+        rolling_win_rate.append(round(float((chunk > 0).sum() / len(chunk) * 100), 2))
+        labels.append(i)
+    
+    return {
+        "rolling_sharpe": rolling_sharpe,
+        "rolling_volatility": rolling_vol,
+        "rolling_win_rate": rolling_win_rate,
+        "labels": labels,
+    }
 
 
 @router.get("/charts/pareto-scatter")
@@ -299,6 +401,8 @@ def pareto_scatter(task_id: str, last_only: bool = False):
             "dd": ind.get("max_drawdown", 0),
             "sharpe": ind.get("sharpe_ratio", 0),
             "oos": ind.get("oos_consistency_score", 0),
+            "var_95": ind.get("var_95", 0),
+            "cvar_95": ind.get("cvar_95", 0),
             "pareto_rank": ind.get("pareto_rank"),
             "passed_absolute": bool(ind.get("passed_absolute")),
             "passed_dynamic": bool(ind.get("passed_dynamic")),
@@ -324,6 +428,139 @@ def evolution_trend(task_id: str):
     return trend
 
 
+@router.post("/individuals/compare")
+def compare_individuals(task_id: str, body: dict):
+    sids: list[str] = body.get("sids", [])
+    conn = get_db()
+    results = []
+    for sid in sids:
+        row = conn.execute(
+            "SELECT strategy_id, params_json, cagr, max_drawdown, sharpe_ratio, profit_factor, win_rate, oos_consistency_score, trade_count, equity_curve_json, generation"
+            " FROM individuals WHERE task_id = ? AND strategy_id = ? ORDER BY generation DESC LIMIT 1",
+            (task_id, sid),
+        ).fetchone()
+        if row:
+            curve_raw = json.loads(row["equity_curve_json"]) if row["equity_curve_json"] else None
+            curve = curve_raw.get("v", curve_raw) if isinstance(curve_raw, dict) else curve_raw
+            results.append({
+                "strategy_id": row["strategy_id"],
+                "cagr": round(row["cagr"] * 100, 2) if row["cagr"] else 0,
+                "max_drawdown": round(row["max_drawdown"], 2),
+                "sharpe_ratio": round(row["sharpe_ratio"], 2),
+                "profit_factor": round(row["profit_factor"], 2),
+                "win_rate": round(row["win_rate"], 2),
+                "oos_score": round(row["oos_consistency_score"], 4) if row["oos_consistency_score"] else 0,
+                "trade_count": row["trade_count"],
+                "generation": row["generation"],
+                "final_equity": round(curve[-1], 2) if curve and len(curve) > 0 else 0,
+            })
+    conn.close()
+    return results
+
+
+class EnsembleStrategy(BaseModel):
+    strategy_id: str
+    params: dict
+
+
+class EnsembleRequest(BaseModel):
+    strategies: list[EnsembleStrategy]
+    symbols: list[str]
+    start_date: str = ""
+    end_date: str = ""
+    timeframe: str = "1d"
+    ensemble_threshold: float = 0.2
+
+
+@router.post("/ensemble")
+def ensemble_backtest(task_id: str, body: EnsembleRequest):
+    """Ensemble — average stored equity curves across multiple champions."""
+    from backtest.metrics import compute_metrics
+
+    symbols = body.symbols
+    if not symbols:
+        task = tm.get_task(task_id)
+        if task and task.config:
+            symbols = task.config.symbols or []
+    if not symbols:
+        raise HTTPException(400, "No symbols specified. Provide symbols in request or check task config.")
+
+    conn = get_db()
+    sids = [s.strategy_id for s in body.strategies]
+    curves: list[list[float]] = []
+    timestamps: list[int] | None = None
+    bar_count = 0
+
+    for sid in sids:
+        row = conn.execute(
+            "SELECT equity_curve_json FROM individuals WHERE task_id = ? AND strategy_id = ? ORDER BY generation DESC LIMIT 1",
+            (task_id, sid),
+        ).fetchone()
+        if not row:
+            continue
+        raw = json.loads(row["equity_curve_json"]) if row["equity_curve_json"] else None
+        if isinstance(raw, dict):
+            curve = raw.get("v", [])
+            ts = raw.get("t", None)
+        elif isinstance(raw, list):
+            curve = raw
+            ts = None
+        else:
+            continue
+        if len(curve) > 1:
+            curves.append(curve)
+            if ts and not timestamps:
+                timestamps = ts
+            bar_count = max(bar_count, len(curve))
+
+    conn.close()
+
+    if len(curves) < 2:
+        raise HTTPException(400, f"Need at least 2 valid equity curves, got {len(curves)}")
+
+    # Trim all curves to same length and average
+    min_len = min(len(c) for c in curves)
+    avg_curve = [round(float(np.mean([c[i] for c in curves])), 2) for i in range(min_len)]
+
+    initial = avg_curve[0]
+    final = avg_curve[-1]
+    total_ret_pct = (final / initial - 1) * 100 if initial > 0 else 0
+    trades_count = sum(sum(1 for i in range(1, min_len) if abs(curves[0][i] - curves[0][i - 1]) > 1) for _ in [0])
+
+    metrics = compute_metrics(avg_curve, [], min_len, 365)
+
+    per_sym_results = {}
+    best_sym = symbols[0] if symbols else None
+    per_sym_results[best_sym or "ensemble"] = {
+        "total_return": metrics["total_return"],
+        "annualized_return": metrics["annualized_return"],
+        "sharpe_ratio": metrics["sharpe_ratio"],
+        "max_drawdown": metrics["max_drawdown"],
+        "win_rate": metrics["win_rate"],
+        "profit_factor": metrics["profit_factor"],
+        "trade_count": metrics["trade_count"],
+        "equity_curve": avg_curve,
+        "equity_timestamps": timestamps or list(range(min_len)),
+    }
+
+    return {
+        "weighted_metrics": {
+            "annualized_return": metrics["annualized_return"],
+            "sharpe_ratio": metrics["sharpe_ratio"],
+            "max_drawdown": metrics["max_drawdown"],
+            "profit_factor": metrics["profit_factor"],
+            "win_rate": metrics["win_rate"],
+            "trade_count": metrics["trade_count"],
+        },
+        "n_strategies": len(curves),
+        "threshold": body.ensemble_threshold,
+        "equity_curve": avg_curve,
+        "equity_timestamps": timestamps or list(range(min_len)),
+        "symbol_results": per_sym_results,
+        "duration_sec": 0.0,
+    }
+
+
 @router.get("/export")
 def export_task(task_id: str, format: str = "json"):
     task = tm.get_task(task_id)
@@ -336,14 +573,24 @@ def export_task(task_id: str, format: str = "json"):
     if format == "csv":
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["strategy_id", "generation", "pareto_rank", "cagr", "max_drawdown",
-                         "sharpe_ratio", "profit_factor", "win_rate", "trade_count", "oos_score"])
+        writer.writerow([
+            "strategy_id", "generation", "pareto_rank",
+            "cagr_pct", "sharpe_ratio", "max_drawdown_pct",
+            "win_rate_pct", "profit_factor", "trade_count", "oos_score",
+        ])
         for ind in individuals:
+            cagr = ind.get("cagr", 0) or 0
+            dd = ind.get("max_drawdown", 0) or 0
+            wr = ind.get("win_rate", 0) or 0
             writer.writerow([
                 ind.get("strategy_id"), ind.get("generation"), ind.get("pareto_rank"),
-                ind.get("cagr"), ind.get("max_drawdown"), ind.get("sharpe_ratio"),
-                ind.get("profit_factor"), ind.get("win_rate"), ind.get("trade_count"),
-                ind.get("oos_consistency_score"),
+                round(cagr * 100, 2),
+                round(ind.get("sharpe_ratio", 0) or 0, 2),
+                round(dd * 100, 2),
+                round(wr * 100, 2),
+                round(ind.get("profit_factor", 0) or 0, 2),
+                ind.get("trade_count", 0) or 0,
+                round(ind.get("oos_consistency_score", 0) or 0, 4),
             ])
         return Response(content=output.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f"attachment; filename=task_{task_id}.csv"})
@@ -355,6 +602,37 @@ def export_task(task_id: str, format: str = "json"):
         "pareto_fronts": fronts,
     }
     return data
+
+
+@router.get("/export/json")
+def export_task_json(task_id: str):
+    conn = get_db()
+    task = conn.execute("SELECT * FROM evolution_tasks WHERE task_id = ?", (task_id,)).fetchone()
+    if not task:
+        conn.close()
+        raise HTTPException(404, "Task not found")
+
+    individuals = conn.execute(
+        "SELECT * FROM individuals WHERE task_id = ? ORDER BY generation, cagr DESC",
+        (task_id,),
+    ).fetchall()
+
+    generations = conn.execute(
+        "SELECT * FROM task_generations WHERE task_id = ? ORDER BY generation",
+        (task_id,),
+    ).fetchall()
+
+    conn.close()
+
+    import datetime
+    result = {
+        "task": dict(task) if task else None,
+        "individuals": [dict(r) for r in individuals],
+        "generations": [dict(r) for r in generations],
+        "exported_at": datetime.datetime.utcnow().isoformat(),
+    }
+
+    return result
 
 
 @router.get("/export/python")

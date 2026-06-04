@@ -9,7 +9,7 @@ try:
 except ImportError:
     pass
 
-from database import init_db, sync_strategies_to_local, checkpoint_db
+from database import init_db, sync_turso_to_local, checkpoint_db
 from seed import seed_templates
 from routes.strategies import router as strategies_router
 from routes.backtest import router as backtest_router
@@ -24,6 +24,9 @@ from routes.paper_trading import set_event_loop as set_pt_event_loop
 from routes.gene_pool import router as gene_pool_router
 from routes.symbols import router as symbols_router
 from routes.live_trading import router as live_trading_router
+from routes.dashboard import router as dashboard_router
+from routes.scheduler import router as scheduler_router
+from routes.notifications import router as notifications_router
 from live_trading.engine import LiveTradingEngine
 from live_trading.scheduler import LiveScheduler
 from live_trading.order_processor import LiveOrderProcessor
@@ -41,6 +44,7 @@ async def lifespan(app: FastAPI):
     set_event_loop(loop)
     set_pt_event_loop(loop)
     init_db()
+    sync_turso_to_local()
     checkpoint_db()
     seed_templates()
     ticker.start()
@@ -72,6 +76,9 @@ app.include_router(paper_trading_router)
 app.include_router(gene_pool_router)
 app.include_router(symbols_router)
 app.include_router(live_trading_router)
+app.include_router(dashboard_router)
+app.include_router(scheduler_router)
+app.include_router(notifications_router)
 
 
 @app.get("/health")
@@ -92,6 +99,17 @@ def vacuum_db():
     except Exception as e:
         from fastapi import HTTPException
         raise HTTPException(503, f"VACUUM failed (close DBeaver first): {e}")
+
+
+@app.post("/system/sync-from-turso")
+def sync_from_turso():
+    """Copy all Turso data to local SQLite so the app works when Turso is unavailable."""
+    try:
+        sync_turso_to_local()
+        return {"detail": "sync completed"}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(500, f"sync failed: {e}")
 
 
 @app.get("/system/db-status")

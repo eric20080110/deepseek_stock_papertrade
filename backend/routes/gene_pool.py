@@ -1,9 +1,12 @@
 import json
+import threading
 import time
+import uuid
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
-from database import get_db, get_turso
+from database import get_db, get_turso, sync_strategies_to_local
+from routes.strategies import _row_to_dict
 
 router = APIRouter(prefix="/gene-pool", tags=["gene_pool"])
 
@@ -90,6 +93,41 @@ def gene_pool(favorites_only: bool = Query(False)):
             })
 
     local.close()
+    return result
+
+
+@router.get("/ranking")
+def champion_ranking():
+    local = get_db()
+    rows = local.execute(
+        """SELECT i.strategy_id, i.task_id, t.name AS task_name, i.generation,
+                  i.cagr, i.max_drawdown, i.sharpe_ratio, i.profit_factor, i.win_rate,
+                  i.oos_consistency_score, i.trade_count, t.config_json
+           FROM individuals i
+           JOIN evolution_tasks t ON i.task_id = t.task_id
+           WHERE i.pareto_rank = 1
+           ORDER BY i.cagr DESC
+           LIMIT 100"""
+    ).fetchall()
+    local.close()
+    result = []
+    for r in rows:
+        config = json.loads(r["config_json"])
+        result.append({
+            "strategy_id": r["strategy_id"],
+            "task_id": r["task_id"],
+            "task_name": r["task_name"],
+            "generation": r["generation"],
+            "cagr": r["cagr"],
+            "max_drawdown": r["max_drawdown"],
+            "sharpe_ratio": r["sharpe_ratio"],
+            "profit_factor": r["profit_factor"],
+            "win_rate": r["win_rate"],
+            "oos_consistency_score": r["oos_consistency_score"],
+            "trade_count": r["trade_count"],
+            "symbols": config.get("symbols", []),
+            "timeframe": config.get("timeframe", "1d"),
+        })
     return result
 
 
@@ -216,6 +254,73 @@ def rename_individual(strategy_id: str, payload: AnnotationPayload):
         conn.commit()
         conn.close()
     return {"ok": True}
+
+
+class CreateStrategyFromChampionBody(BaseModel):
+    name: str
+    description: str = ""
+
+
+@router.post("/{sid}/create-strategy")
+def create_strategy_from_champion(sid: str, body: CreateStrategyFromChampionBody):
+    local = get_db()
+    ind = local.execute(
+        "SELECT * FROM individuals WHERE strategy_id = ?", (sid,)
+    ).fetchone()
+    if not ind:
+        local.close()
+        raise HTTPException(status_code=404, detail="Individual not found")
+
+    params_json = ind["params_json"]
+    task_id = ind["task_id"]
+
+    task = local.execute(
+        "SELECT * FROM evolution_tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    local.close()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task_config = json.loads(task["config_json"])
+    strategy_config_id = task_config.get("strategy_config_id")
+    if not strategy_config_id:
+        raise HTTPException(status_code=400, detail="Task has no strategy_config_id")
+
+    t, is_remote = _remote_conn()
+    original = t.execute(
+        "SELECT * FROM strategy_configs WHERE config_id = ?", (strategy_config_id,)
+    ).fetchone()
+    if not original:
+        raise HTTPException(status_code=404, detail="Original strategy config not found")
+
+    template_params = json.loads(original["parameters_json"])
+    champion_params = json.loads(params_json)
+    merged_params = []
+    for p in template_params:
+        p = dict(p)
+        if p["name"] in champion_params:
+            p["default"] = champion_params[p["name"]]
+        merged_params.append(p)
+
+    now = int(time.time())
+    config_id = str(uuid.uuid4())
+
+    t.execute(
+        """INSERT INTO strategy_configs
+           (config_id, name, description, template_id, is_template, is_locked,
+            parameters_json, constraints_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?)""",
+        (config_id, body.name, body.description, strategy_config_id,
+         json.dumps(merged_params), original["constraints_json"], now, now),
+    )
+    row = t.execute("SELECT * FROM strategy_configs WHERE config_id = ?", (config_id,)).fetchone()
+    if not is_remote:
+        t.commit()
+        t.close()
+
+    threading.Thread(target=sync_strategies_to_local, daemon=True).start()
+
+    return _row_to_dict(row)
 
 
 @router.delete("/{strategy_id}")

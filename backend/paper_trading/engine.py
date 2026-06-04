@@ -278,24 +278,35 @@ class PaperTradingEngine:
 
     def _get_fresh_data(self, sym: str, timeframe: str):
         from backtest.data_cache import DATA_CACHE
+        from backtest.parquet_cache import get as pq_get, stale as pq_stale
         bar_sec = self._BAR_SEC.get(timeframe, 86400)
         now = int(time.time())
-        # Only check in-memory — never block the main thread with a network call.
+        max_age = {"1d": 86400, "1h": 7200, "30m": 3600, "15m": 1800, "5m": 600, "1m": 120}.get(timeframe, 86400)
+
         df = DATA_CACHE.load(sym, timeframe)
         if df is not None and len(df) > 0:
-            if now - int(df.index[-1]) <= bar_sec * 5:
+            if now - int(df.index[-1]) <= bar_sec * 3:
                 return df
-            # Stale — background refresh, return stale data immediately.
-            _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, timeframe, True)
-            return df
-        # Nothing in memory — fetch in executor with timeout so we never block.
+
+        # Try parquet cache (has full-history data from evolution)
+        if not pq_stale(sym, timeframe, max_age):
+            pq_df = pq_get(sym, timeframe)
+            if pq_df is not None and len(pq_df) > 0:
+                DATA_CACHE.store(sym, pq_df, timeframe)
+                if now - int(pq_df.index[-1]) <= bar_sec * 3:
+                    return pq_df
+
+        # Try remote fetch (only for latest bar, without force_refresh to preserve parquet)
         try:
-            future = _DATA_FETCH_EXECUTOR.submit(
-                DATA_CACHE.ensure, sym, None, None, timeframe, True
-            )
-            return future.result(timeout=15)
+            future = _DATA_FETCH_EXECUTOR.submit(DATA_CACHE.ensure, sym, None, None, timeframe, False)
+            fetched = future.result(timeout=10)
+            if fetched is not None and len(fetched) > 0:
+                DATA_CACHE.store(sym, fetched, timeframe)
+                return fetched
         except Exception:
-            return None
+            pass
+
+        return df if df is not None and len(df) > 0 else None
 
     def prewarm_cache(self):
         """Background-fetch OHLCV for all running instances so first tick is fast."""

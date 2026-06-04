@@ -27,6 +27,9 @@ class IndividualScore(BaseModel):
     objective_vector: ObjectiveVector = ObjectiveVector()
     threshold_metrics: ThresholdMetrics = ThresholdMetrics()
     elimination_reason: Optional[str] = None
+    equity_curve: list[float] = []
+    final_score: float = 0.0
+    overfit_penalty: float = 0.0
 
 
 class GenerationSummary(BaseModel):

@@ -5,6 +5,7 @@ from .config import SETTINGS, FitnessSettings
 from .models import (
     IndividualScore, ObjectiveVector, ThresholdMetrics, GenerationSummary,
 )
+from backtest.metrics import run_monte_carlo
 
 
 def compute_r2(equity_curve: list[float]) -> float:
@@ -68,15 +69,39 @@ class FitnessScorer:
             if r2 < s.abs_r2_min:
                 return False, f"R² {r2:.3f} < {s.abs_r2_min}"
 
+            mc = run_monte_carlo(eq, n_simulations=500, confidence=0.95)
+            if "error" not in mc:
+                if mc["prob_positive"] < s.abs_mc_prob_positive_min:
+                    return False, f"MC prob_positive {mc['prob_positive']}% < {s.abs_mc_prob_positive_min}%"
+                if mc["ci_lower_return"] < s.abs_mc_ci_lower_return_min:
+                    return False, f"MC CI lower {mc['ci_lower_return']}% < {s.abs_mc_ci_lower_return_min}%"
+
         return True, None
+
+    @staticmethod
+    def _blend(val: float, oos: float) -> float:
+        return val * (0.5 + 0.5 * oos)
+
+    @staticmethod
+    def _blend_dd(val: float, oos: float) -> float:
+        return val / max(0.5 + 0.5 * oos, 0.1)
+
+    def _blended_cagr(self, s: IndividualScore) -> float:
+        return self._blend(s.objective_vector.cagr, s.oos_consistency_score)
+
+    def _blended_sharpe(self, s: IndividualScore) -> float:
+        return self._blend(s.objective_vector.sharpe, s.oos_consistency_score)
+
+    def _blended_dd(self, s: IndividualScore) -> float:
+        return self._blend_dd(s.objective_vector.max_drawdown, s.oos_consistency_score)
 
     def compute_dynamic_thresholds(
         self, scores: list[IndividualScore]
     ) -> dict[str, float]:
         pct = self.settings.dynamic_elimination_pct
-        cagrs = [s.objective_vector.cagr for s in scores]
-        dd = [s.objective_vector.max_drawdown for s in scores]
-        sharpes = [s.objective_vector.sharpe for s in scores]
+        cagrs = [self._blended_cagr(s) for s in scores]
+        dd = [self._blended_dd(s) for s in scores]
+        sharpes = [self._blended_sharpe(s) for s in scores]
 
         return {
             "cagr": float(np.percentile(cagrs, pct * 100)) if cagrs else 0,
@@ -87,12 +112,11 @@ class FitnessScorer:
     def check_dynamic_threshold(
         self, score: IndividualScore, thresholds: dict[str, float]
     ) -> bool:
-        obj = score.objective_vector
-        if obj.cagr < thresholds.get("cagr", -float("inf")):
+        if self._blended_cagr(score) < thresholds.get("cagr", -float("inf")):
             return False
-        if obj.max_drawdown > thresholds.get("max_drawdown", float("inf")):
+        if self._blended_dd(score) > thresholds.get("max_drawdown", float("inf")):
             return False
-        if obj.sharpe < thresholds.get("sharpe", -float("inf")):
+        if self._blended_sharpe(score) < thresholds.get("sharpe", -float("inf")):
             return False
         return True
 
@@ -135,14 +159,17 @@ class FitnessScorer:
         return front
 
     def _dominates(self, a: IndividualScore, b: IndividualScore) -> bool:
-        oa = a.objective_vector
-        ob = b.objective_vector
-        cagr_better = oa.cagr >= ob.cagr
-        dd_better = oa.max_drawdown <= ob.max_drawdown
-        sharpe_better = oa.sharpe >= ob.sharpe
-        strictly_better = (
-            oa.cagr > ob.cagr or oa.max_drawdown < ob.max_drawdown or oa.sharpe > ob.sharpe
-        )
+        a_cagr = self._blended_cagr(a)
+        a_dd = self._blended_dd(a)
+        a_sharpe = self._blended_sharpe(a)
+        b_cagr = self._blended_cagr(b)
+        b_dd = self._blended_dd(b)
+        b_sharpe = self._blended_sharpe(b)
+
+        cagr_better = a_cagr >= b_cagr
+        dd_better = a_dd <= b_dd
+        sharpe_better = a_sharpe >= b_sharpe
+        strictly_better = a_cagr > b_cagr or a_dd < b_dd or a_sharpe > b_sharpe
         return cagr_better and dd_better and sharpe_better and strictly_better
 
     def _compute_crowding_distances(self, front: list[IndividualScore]):
@@ -155,20 +182,18 @@ class FitnessScorer:
         for s in front:
             s.crowding_distance = 0.0
 
-        for key in ["cagr", "max_drawdown", "sharpe"]:
-            sorted_front = sorted(
-                front, key=lambda s: getattr(s.objective_vector, key)
-            )
-            min_val = getattr(sorted_front[0].objective_vector, key)
-            max_val = getattr(sorted_front[-1].objective_vector, key)
+        for key, getter in [("cagr", self._blended_cagr), ("max_drawdown", self._blended_dd), ("sharpe", self._blended_sharpe)]:
+            sorted_front = sorted(front, key=getter)
+            min_val = getter(sorted_front[0])
+            max_val = getter(sorted_front[-1])
             rng = max_val - min_val
             if rng == 0:
                 continue
             sorted_front[0].crowding_distance = 1e9
             sorted_front[-1].crowding_distance = 1e9
             for i in range(1, n - 1):
-                val_hi = getattr(sorted_front[i + 1].objective_vector, key)
-                val_lo = getattr(sorted_front[i - 1].objective_vector, key)
+                val_hi = getter(sorted_front[i + 1])
+                val_lo = getter(sorted_front[i - 1])
                 contribution = (val_hi - val_lo) / rng
                 sorted_front[i].crowding_distance = (
                     sorted_front[i].crowding_distance or 0
@@ -197,10 +222,18 @@ def score_individuals(
         sid = is_m.get("strategy_id", f"ind_{i}")
         oos_score = scorer.compute_oos_consistency(is_m, oos_m)
 
+        is_cagr = is_m.get("annualized_return", 0) or 0
+        is_dd = is_m.get("max_drawdown", 0) or 0
+        is_sharpe = is_m.get("sharpe_ratio", 0) or 0
+
+        # Overfitting: gap between IS and OOS performance
+        oos_cagr = oos_m.get("annualized_return", 0) or 0
+        overfit = max(0, is_cagr - oos_cagr) / max(abs(is_cagr), 0.01) if is_cagr != 0 else 0.0
+
         obj = ObjectiveVector(
-            cagr=is_m.get("annualized_return", 0) or 0,
-            max_drawdown=is_m.get("max_drawdown", 0) or 0,
-            sharpe=is_m.get("sharpe_ratio", 0) or 0,
+            cagr=is_cagr,
+            max_drawdown=is_dd,
+            sharpe=is_sharpe,
         )
         tm = ThresholdMetrics(
             profit_factor=is_m.get("profit_factor", 0) or 0,
@@ -210,11 +243,14 @@ def score_individuals(
             oos_score=oos_score,
         )
 
+        eq = is_m.get("equity_curve", []) or []
         score = IndividualScore(
             strategy_id=sid,
             oos_consistency_score=oos_score,
             objective_vector=obj,
             threshold_metrics=tm,
+            equity_curve=eq,
+            overfit_penalty=overfit,
         )
         scores.append(score)
 
@@ -225,7 +261,7 @@ def score_individuals(
                 "profit_factor": s.threshold_metrics.profit_factor,
                 "win_rate": s.threshold_metrics.win_rate,
                 "trade_count": s.threshold_metrics.trade_count,
-                "equity_curve": [],
+                "equity_curve": s.equity_curve,
             },
             s.oos_consistency_score,
         )
@@ -242,6 +278,8 @@ def score_individuals(
             abs_win_rate_min=scorer.settings.abs_win_rate_min * 0.8,
             abs_trade_count_min=max(1, int(scorer.settings.abs_trade_count_min * 0.8)),
             abs_oos_consistency_min=scorer.settings.abs_oos_consistency_min * 0.8,
+            abs_mc_prob_positive_min=scorer.settings.abs_mc_prob_positive_min * 0.8,
+            abs_mc_ci_lower_return_min=scorer.settings.abs_mc_ci_lower_return_min * 0.8,
         ))
         for s in scores:
             if not s.passed_absolute_threshold:
@@ -250,7 +288,7 @@ def score_individuals(
                         "profit_factor": s.threshold_metrics.profit_factor,
                         "win_rate": s.threshold_metrics.win_rate,
                         "trade_count": s.threshold_metrics.trade_count,
-                        "equity_curve": [],
+                        "equity_curve": s.equity_curve,
                     },
                     s.oos_consistency_score,
                 )
@@ -274,6 +312,14 @@ def score_individuals(
     # Pareto ranking on survivors
     if survived_dyn:
         scorer.pareto_rank(survived_dyn)
+
+    # Composite final score for tie-breaking within Pareto fronts
+    for s in scores:
+        blend = 0.5 + 0.5 * s.oos_consistency_score
+        bcagr = s.objective_vector.cagr * blend
+        bsharpe = s.objective_vector.sharpe * blend
+        bdd = s.objective_vector.max_drawdown / max(blend, 0.1)
+        s.final_score = (bcagr * 0.4 + bsharpe * 0.3 - bdd * 0.1) - s.overfit_penalty * 0.2
 
     # Build generation summary
     front = [s for s in survived_dyn if s.pareto_rank == 1]
