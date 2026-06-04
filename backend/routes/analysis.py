@@ -11,7 +11,7 @@ from backtest.data_cache import DATA_CACHE
 router = APIRouter(prefix="/tasks/{task_id}", tags=["analysis"])
 tm = TaskManager()
 
-_MAX_CHART_PTS = 1000
+_MAX_CHART_PTS = 2000
 
 
 def _downsample(series: list, max_pts: int = _MAX_CHART_PTS) -> list:

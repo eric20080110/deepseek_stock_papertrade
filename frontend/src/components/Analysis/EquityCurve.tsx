@@ -28,10 +28,6 @@ interface IndividualRecord {
 
 const COLORS = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#be123c', '#4f46e5']
 
-function parseDateToTs(dateStr: string): number {
-  return Math.floor(new Date(String(dateStr).replace(' ', 'T') + 'Z').getTime() / 1000)
-}
-
 export function EquityCurve({ taskId }: Props) {
   const chartRef = useRef<HTMLDivElement>(null)
   const priceRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -41,7 +37,6 @@ export function EquityCurve({ taskId }: Props) {
     dates: string[]
   }>({ prices: {}, trades: {}, dates: [] })
   const dcaRef = useRef<{ x: string[]; y: number[] } | null>(null)
-  const layoutRef = useRef<Record<string, unknown> | null>(null)
   const [sid, setSid] = useState<string | null>(null)
   const [individuals, setIndividuals] = useState<IndividualRecord[]>([])
   const [symbolsList, setSymbolsList] = useState<string[]>([])
@@ -131,7 +126,7 @@ export function EquityCurve({ taskId }: Props) {
         ? ((last / combined[cut]) - 1) * 100 : null
       setMetrics({ totalReturn, valReturn })
 
-      const layout: Record<string, unknown> = {
+      Plotly.newPlot(el, traces, {
         title: { text: '資金曲線' },
         margin: { t: 40, r: 60, b: 40, l: 60 },
         yaxis: { title: '金額', type: logScale ? 'log' : 'linear' },
@@ -142,69 +137,11 @@ export function EquityCurve({ taskId }: Props) {
         }] : [],
         paper_bgcolor: 'white', plot_bgcolor: 'white',
         legend: { x: 1, xanchor: 'right', y: 0, yanchor: 'bottom', font: { size: 10 } },
-      }
-      layoutRef.current = layout
-      Plotly.newPlot(el, traces, layout, { responsive: true, displayModeBar: false })
-      ;(el as unknown as { on: (e: string, h: (d: Record<string, unknown>) => void) => void }).on('plotly_relayout', handleRelayout)
-    }
-
-    const handleRelayout = async (eventData: Record<string, unknown>) => {
-      if (cancelled || !el) return
-      const isReset = eventData['xaxis.autorange'] === true
-      const x0 = eventData['xaxis.range[0]'] as string | undefined
-      const x1 = eventData['xaxis.range[1]'] as string | undefined
-
-      if (isReset) {
-        const resp = await fetch(`/tasks/${taskId}/individuals/${sid}/equity-curve?max_points=500`)
-        if (!resp.ok || cancelled) return
-        renderFull(await resp.json() as EquityCurveData)
-        return
-      }
-      if (!x0 || !x1) return
-
-      const startTs = parseDateToTs(x0)
-      const endTs = parseDateToTs(x1)
-      if (!startTs || !endTs || startTs >= endTs) return
-
-      const resp = await fetch(
-        `/tasks/${taskId}/individuals/${sid}/equity-curve?max_points=1000&start_ts=${startTs}&end_ts=${endTs}`
-      )
-      if (!resp.ok || cancelled) return
-      const zoomData = await resp.json() as EquityCurveData
-
-      const combined: number[] = zoomData.equity_curve || []
-      const dates: string[] = zoomData.dates || []
-      if (combined.length === 0) return
-
-      const xDates = dates.length > 0 ? dates : Array.from({ length: combined.length }, (_, i) => String(i))
-
-      let maxPeak = combined[0]
-      const drawdownPct = combined.map(v => {
-        maxPeak = Math.max(maxPeak, v)
-        return ((v - maxPeak) / maxPeak) * 100
-      })
-
-      const traces: Record<string, unknown>[] = [{
-        x: xDates, y: combined, type: 'scatter', mode: 'lines', name: '資金曲線',
-        line: { color: '#2563eb' },
-      }]
-      if (dcaRef.current) {
-        traces.push({ x: dcaRef.current.x, y: dcaRef.current.y, type: 'scatter', mode: 'lines', name: '定投對照', line: { color: '#22c55e', width: 2, dash: 'dot' } })
-      }
-      traces.push({ x: xDates, y: drawdownPct, type: 'scatter', mode: 'lines', name: '回撤', line: { color: '#ef4444' }, yaxis: 'y2', fill: 'tozeroy' })
-
-      Plotly.newPlot(el, traces, {
-        title: { text: '資金曲線' },
-        margin: { t: 40, r: 60, b: 40, l: 60 },
-        yaxis: { title: '金額', type: logScale ? 'log' : 'linear' },
-        yaxis2: { title: '回撤 %', overlaying: 'y', side: 'right', automargin: true },
-        paper_bgcolor: 'white', plot_bgcolor: 'white',
-        legend: { x: 1, xanchor: 'right', y: 0, yanchor: 'bottom', font: { size: 10 } },
       }, { responsive: true, displayModeBar: false })
     }
 
     setLoading(true)
-    fetch(`/tasks/${taskId}/individuals/${sid}/equity-curve?max_points=500`)
+    fetch(`/tasks/${taskId}/individuals/${sid}/equity-curve?max_points=2000`)
       .then((r) => r.json())
       .then((data: EquityCurveData) => { if (!cancelled) { setLoading(false); renderFull(data) } })
       .catch(() => { if (!cancelled) setLoading(false) })
