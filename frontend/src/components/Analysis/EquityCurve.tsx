@@ -177,15 +177,30 @@ export function EquityCurve({ taskId }: Props) {
       if (combined.length === 0) return
 
       const xDates = dates.length > 0 ? dates : Array.from({ length: combined.length }, (_, i) => String(i))
+
+      let maxPeak = combined[0]
+      const drawdownPct = combined.map(v => {
+        maxPeak = Math.max(maxPeak, v)
+        return ((v - maxPeak) / maxPeak) * 100
+      })
+
       const traces: Record<string, unknown>[] = [{
-        x: xDates, y: combined,
-        type: 'scatter', mode: 'lines', name: '資金曲線 (放大)',
+        x: xDates, y: combined, type: 'scatter', mode: 'lines', name: '資金曲線',
         line: { color: '#2563eb' },
       }]
       if (dcaRef.current) {
         traces.push({ x: dcaRef.current.x, y: dcaRef.current.y, type: 'scatter', mode: 'lines', name: '定投對照', line: { color: '#22c55e', width: 2, dash: 'dot' } })
       }
-      Plotly.react(el, traces, layoutRef.current || {})
+      traces.push({ x: xDates, y: drawdownPct, type: 'scatter', mode: 'lines', name: '回撤', line: { color: '#ef4444' }, yaxis: 'y2', fill: 'tozeroy' })
+
+      Plotly.newPlot(el, traces, {
+        title: { text: '資金曲線' },
+        margin: { t: 40, r: 60, b: 40, l: 60 },
+        yaxis: { title: '金額', type: logScale ? 'log' : 'linear' },
+        yaxis2: { title: '回撤 %', overlaying: 'y', side: 'right', automargin: true },
+        paper_bgcolor: 'white', plot_bgcolor: 'white',
+        legend: { x: 1, xanchor: 'right', y: 0, yanchor: 'bottom', font: { size: 10 } },
+      }, { responsive: true, displayModeBar: false })
     }
 
     setLoading(true)
